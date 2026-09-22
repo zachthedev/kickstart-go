@@ -1,0 +1,34 @@
+name: codeql
+
+# Code scanning from a committed workflow, never default setup. The reusable workflow runs one
+# analysis per language listed below and names each check run Analyze (<language>), so the
+# branch ruleset can require them by name. Each run's log says which build mode ran before its
+# conclusion is trusted.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # At least once a week, so a query published after the last change still reports against
+  # this tree. Clear of deps.yml's daily cron.
+  schedule:
+    - cron: '37 9 * * 4'
+
+permissions: {}
+
+jobs:
+  # The pin below is filled from the first zachthedev/.github release. Renovate moves it after
+  # that. go is the shipped language and actions the workflows; nothing else is analyzed. Go
+  # takes autobuild: the CodeQL CLI refuses build-mode none for Go ("Go does not support the
+  # none build mode"), and autobuild runs go build under the toolchain go.mod names. The
+  # called job gets at most what is granted here.
+  codeql:
+    permissions:
+      # Uploading the results to code scanning.
+      security-events: write
+      # Reading the checkout.
+      contents: read
+      # Reading the run's metadata, which a private repository needs for the upload.
+      actions: read
+    uses: zachthedev/.github/.github/workflows/codeql.yml@c53d09e393028ceddee0d761f2a7963394289a72 # v0.1.0
+    with:
+      languages: '[{"language": "go", "build-mode": "autobuild"}, {"language": "actions"}]'

@@ -1,0 +1,7 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": [
+    "TODO(kickstart): drop the template preset from extends. It is the layer for a template repository alone, and a clone takes the kind preset by itself."
+  ],
+  "extends": ["github>zachthedev/.github//renovate/go-cli", "github>zachthedev/.github//renovate/template"]
+}

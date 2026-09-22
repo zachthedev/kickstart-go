@@ -1,0 +1,20 @@
+[
+  {
+    "scope": "kickstart",
+    "covers": "TODO(kickstart): replace this vocabulary with your project's scopes, one per part of the repository a commit can change. Until then this scope covers the commits that absorb the template."
+  },
+  { "scope": "cli", "covers": "The commands under cmd/ and their flags" },
+  { "scope": "generate", "covers": "cmd/generate, internal/generate and the files they write" },
+  { "scope": "logger", "covers": "internal/logger" },
+  { "scope": "migrate", "covers": "internal/migrate" },
+  { "scope": "paths", "covers": "internal/paths" },
+  { "scope": "remote", "covers": "internal/remote" },
+  { "scope": "version", "covers": "internal/version and the build settings under internal/buildenv" },
+  {
+    "scope": "gate",
+    "covers": "Taskfile.yml, the scripts under scripts/, internal/tools and the tools mise.toml pins"
+  },
+  { "scope": "deps", "covers": "Dependency updates, which Renovate opens under this scope" },
+  { "scope": "docs", "covers": "README.md, CONTRIBUTING.md, SECURITY.md, AGENTS.md and the documents under docs/" },
+  { "scope": "release", "covers": "release-please's configuration and manifest" }
+]

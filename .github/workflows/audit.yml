@@ -1,0 +1,22 @@
+name: audit
+
+# The scheduled report, on its own clock. Go's whole-tree advisory reader is govulncheck, and it runs in
+# the gate on every push and pull request, so this file carries one job alone: the reusable workflows
+# workflow, whose zizmor runs online and asks GitHub about every pinned action. A pull request runs the
+# same audits, and this run repeats them weekly, so a pinned commit that leaves its action's repository
+# or a ref that moves is reported with no pull request open. A red run is a report, never a check.
+on:
+  # At least once a week, on a day clear of deps.yml's daily cron and codeql.yml's Thursday.
+  schedule:
+    - cron: '17 6 * * 2'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  # The pin below is filled from the first zachthedev/.github release. Renovate moves it after
+  # that. The called job gets at most what is granted here: a checkout and the read-only audits.
+  workflows:
+    permissions:
+      contents: read
+    uses: zachthedev/.github/.github/workflows/workflows.yml@c53d09e393028ceddee0d761f2a7963394289a72 # v0.1.0

@@ -1,0 +1,23 @@
+# Coverage enforcement via go-test-coverage, a tool directive in go.mod.
+# Run: go tool task coverage
+#
+# Per-package and overall thresholds are enforced. The per-file threshold
+# is 0, so no file fails on its own.
+
+profile: coverage.out
+
+threshold:
+  # Per-file minimum. Files below this fail CI.
+  file: 0
+
+  # Per-package minimum.
+  package: 80
+
+  # Overall project minimum.
+  total: 70
+
+override:
+  # cmd/ packages have CLI wiring that can't easily be unit tested.
+  # Business logic lives in internal/.
+  - threshold: 0
+    path: ^cmd/

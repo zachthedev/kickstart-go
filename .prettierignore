@@ -1,0 +1,7 @@
+# Written by release-please on every release. Its bullets are `*` and its
+# version headers carry a blank line prettier would collapse, so formatting it
+# turns each release into a failing check on main.
+CHANGELOG.md
+# Written by cmd/generate, whose table is not column-aligned the way prettier
+# wants it. The generate task checks it by regenerating, not by formatting.
+MARKERS.md

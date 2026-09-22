@@ -1,0 +1,45 @@
+# The tools the gate runs that no stack owns, pinned. One version per tool,
+# here and nowhere else: the workflows task resolves each binary through
+# `mise which`, and the ci workflow installs from this file. Every tool Go
+# owns is a tool directive in go.mod instead.
+#
+# A bare name comes from mise's registry, which routes it to a release artifact
+# through the aqua backend. mise.lock holds the artifact each version resolved
+# to, per platform in lockfile_platforms, and the gate reads that file against
+# the owner, host and provenance internal/tools/gate expects before anything
+# installs from it. `mise lock` rewrites it after any edit to [tools].
+
+[tools]
+actionlint = "1.7.12"
+shellcheck = "0.11.0"
+zizmor = "1.30.1"
+
+[tool_config]
+# The locked mode no environment variable reaches. mise refuses to install a
+# version mise.lock does not record, so an edit to [tools] with no relock is
+# refused rather than fetched.
+locked = true
+
+[settings]
+# The same refusal at the settings level, which is what `mise which` answers
+# for. MISE_LOCKED=false or a locked_scopes list without project turns it off,
+# and neither reaches the [tool_config] line above.
+locked = true
+# mise.lock is written as well as read, so a bump records what it resolved to.
+lockfile = true
+# The platforms mise.lock pins, which are the platforms the ci matrix runs.
+lockfile_platforms = ["linux-x64", "macos-arm64", "windows-x64"]
+# Every install re-verifies an attested artifact against its attestation. The
+# expectation comes from the lockfile's own entry, so this arms the downgrade
+# refusal for an entry that claims provenance and replaces none of the gate's
+# assertions.
+locked_verify_provenance = true
+# An attestation query that cannot complete is an install error rather than a
+# skipped check.
+provenance_api_failures_fatal = true
+# The attestation switches. mise defaults both on, and they are written out
+# because a default is a thing that can change under the repository.
+github_attestations = true
+
+[settings.aqua]
+github_attestations = true

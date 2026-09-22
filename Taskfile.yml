@@ -1,0 +1,293 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+version: '3'
+
+# Commands run through task's own POSIX interpreter on every platform, so
+# nothing here may reach for a bashism, for cmd.exe or for PowerShell. A
+# command that needs more than one line stays a script under scripts/ and is
+# invoked as one.
+set: [errexit, pipefail]
+
+# Local build settings, loaded into the environment of every task. A missing
+# file is the ordinary case; `.env.template` documents what may go in here.
+dotenv: ['.env']
+
+vars:
+  # Every variable below reads, in order: a value given on the command line
+  # (`go tool task build GOOS=linux`), then `.env`, then the environment,
+  # then the default written here. A variable with no default resolves to
+  # the empty string, which the Go toolchain reads as its own default. Every
+  # value reaches a command through shellQuote, so a value is one shell word
+  # whatever it carries; a list variable is split into words first with
+  # splitArgs.
+  GOOS: '{{.GOOS}}'
+  GOARCH: '{{.GOARCH}}'
+  CGO_ENABLED: '{{.CGO_ENABLED | default "0"}}'
+  CC: '{{.CC}}'
+
+  # A linter sees only the files the target platform compiles, so one run
+  # exempts every platform-gated file from every rule. `lint` runs once per
+  # platform named here, which is what reaches a file selected by a
+  # _windows.go suffix or a `//go:build darwin` line.
+  LINT_PLATFORMS: '{{.LINT_PLATFORMS | default "linux darwin windows"}}'
+
+  # Packages every test task runs against. One definition, so `testquick`,
+  # `test` and `coverage` cannot cover different package sets.
+  TEST_TARGET: '{{.TEST_TARGET | default "./..."}}'
+
+  # Build tags. Empty by default, so `task build` produces a production
+  # binary with no dev-only code compiled in. `task build TAGS=dev` adds it.
+  TAGS: '{{.TAGS}}'
+  GO_TAG_FLAGS: '{{if .TAGS}}-tags {{shellQuote .TAGS}}{{end}}'
+
+  # Extra arguments for the two gates that take a subcommand.
+  ARGS: '{{.ARGS}}'
+
+  # Build inputs. This file is the only place a default is written: every
+  # script under scripts/ refuses a value it was not given rather than
+  # substituting one, so a task and a bare script invocation cannot build
+  # different things. Override on the command line, e.g.
+  # `go tool task build VERSION=1.2.3`.
+  BUILD_TARGET: '{{.BUILD_TARGET | default "./cmd/..."}}'
+
+  # What `release` ships: the packages users run, built for every os/arch pair
+  # named, which cd.yml attaches to the release. cmd/generate is a development
+  # tool and stays out.
+  # TODO(kickstart): name your binary's package and the platforms you support.
+  RELEASE_PACKAGES: '{{.RELEASE_PACKAGES | default "./cmd/example"}}'
+  RELEASE_TARGETS: '{{.RELEASE_TARGETS | default "linux/amd64 linux/arm64 darwin/arm64 windows/amd64"}}'
+
+  # TODO(kickstart): update these two to your module's internal paths.
+  VERSION_PKG: '{{.VERSION_PKG | default "zach.tools/go/kickstart/internal/version"}}'
+  REMOTE_PKG: '{{.REMOTE_PKG | default "zach.tools/go/kickstart/internal/remote"}}'
+
+  # These three are discovered rather than defaulted. scripts/build.sh reads
+  # them from git when they arrive empty, which is logic rather than a value
+  # and so belongs with the script that needs it.
+  VERSION: '{{.VERSION}}'
+  REPO_OWNER: '{{.REPO_OWNER}}'
+  REPO_NAME: '{{.REPO_NAME}}'
+
+tasks:
+  # ///// Help /////
+
+  help:
+    desc: list every task with its description
+    silent: true
+    cmd: '{{shellQuote .TASK_EXE}} --list'
+
+  # ///// Tools /////
+
+  # One task asserts and then installs, so the assertions read mise.lock
+  # before anything is fetched from it. mise refuses a version the lockfile
+  # does not name and a platform it does not cover; the gate program holds
+  # the rest (checksum, backend, url host and path, provenance) to the
+  # expectations in internal/tools/gate/pins.go.
+  tools:
+    desc: assert mise.toml and mise.lock against internal/tools/gate, then install from the lockfile
+    cmds:
+      - go run ./internal/tools/gate pins
+      - mise install --locked
+
+  # ///// Canonical form /////
+
+  tidy:
+    desc: report whether go.mod/go.sum are canonical
+    silent: true
+    cmds:
+      - >-
+        go mod tidy -diff ||
+        { echo ""; echo "FAIL: go.mod/go.sum not tidy. Run 'go mod tidy' and commit."; exit 1; }
+
+  # A committed generated file is checked by regenerating it in the tree and
+  # diffing. git diff reads the worktree against the index, so a stale index
+  # fails on purpose, and an output git does not track yet passes git diff,
+  # so the second command refuses one.
+  generate:
+    desc: regenerate files produced by go:generate and fail when the tree differs
+    vars:
+      OUTPUTS:
+        sh: go run ./cmd/generate list outputs
+    cmds:
+      - go generate ./...
+      - git diff --exit-code -- {{range .OUTPUTS | splitLines}}{{shellQuote .}} {{end}}
+      - >-
+        untracked=$(git ls-files --others --exclude-standard -- {{range .OUTPUTS | splitLines}}{{shellQuote .}} {{end}});
+        if [ -n "$untracked" ]; then echo "FAIL: generated files are not tracked. Stage them:"; echo "$untracked"; exit 1; fi
+
+  # golangci-lint's formatters are the formatting check inside `lint`. This
+  # task rewrites the files the way that check wants them.
+  fmt:
+    desc: apply golangci-lint's formatters (gofumpt and goimports)
+    cmd: go tool golangci-lint fmt
+
+  # Prettier owns every file Go does not: YAML, JSON, Markdown.
+  format:
+    desc: prettier --check over the tree
+    cmd: bunx --no-install prettier --check .
+
+  # ///// Static analysis /////
+
+  # `go tool -n` builds the linter for this host and prints its path. The
+  # per-platform runs then set GOOS for the linter alone: a GOOS in front of
+  # `go tool` itself would build the linter for that platform and fail to
+  # start it here.
+  lint:
+    desc: run golangci-lint across the module, once per supported platform
+    vars:
+      LINTER:
+        sh: go tool -n golangci-lint
+    cmds:
+      - for: { var: LINT_PLATFORMS, as: PLATFORM }
+        cmd: GOOS={{shellQuote .PLATFORM}} {{shellQuote .LINTER}} run
+
+  vet:
+    desc: run go vet
+    cmd: go vet ./...
+
+  testpair:
+    desc: verify 1:1 source/test file pairing
+    cmd: go tool testpair {{range splitArgs .ARGS}}{{shellQuote .}} {{end}}./cmd/... ./internal/...
+
+  # ARGS=update regenerates .allow.deadcode from current findings. It writes
+  # entries with no category tag and replaces the file header, so the tags go
+  # back by hand and any note left in that file does not survive.
+  #
+  # The wrapper is named by its full package path, because go.mod holds two
+  # tools whose last element is deadcode: this wrapper and the analyzer it
+  # runs, golang.org/x/tools/cmd/deadcode, which the wrapper resolves through
+  # `go tool` and never from PATH.
+  deadcode:
+    desc: report unreachable exported symbols
+    cmd: go tool zach.tools/go/devtools/cmd/deadcode {{range splitArgs .ARGS}}{{shellQuote .}} {{end}}
+
+  # actionlint and zizmor are the readers of workflow YAML. No test in this
+  # repository reads a workflow file. The canary proves ShellCheck ran, because
+  # actionlint exits 0 with it absent and no flag changes that. zizmor runs
+  # online when gh holds a token, because some audits read the pinned actions'
+  # repositories, and offline otherwise, so no contributor needs a token. The
+  # token travels through env: and never through the command line task echoes.
+  # --strict-collection fails on a file zizmor cannot parse rather than
+  # dropping it. The config is named, so ZIZMOR_CONFIG cannot swap it.
+  workflows:
+    desc: actionlint with ShellCheck proven present, then zizmor, over .github/workflows
+    vars:
+      ACTIONLINT:
+        sh: mise which actionlint
+      SHELLCHECK:
+        sh: mise which shellcheck
+      ZIZMOR:
+        sh: mise which zizmor
+      GH_TOKEN:
+        sh: gh auth token 2>/dev/null || true
+    env:
+      GH_TOKEN: '{{.GH_TOKEN}}'
+    cmds:
+      - go run ./internal/tools/gate canary {{shellQuote .ACTIONLINT}} {{shellQuote .SHELLCHECK}}
+      - '{{shellQuote .ACTIONLINT}} -shellcheck={{shellQuote .SHELLCHECK}} -pyflakes='
+      - >-
+        {{shellQuote .ZIZMOR}} --no-progress --strict-collection --config .github/zizmor.yml
+        {{if not .GH_TOKEN}}--offline{{end}} .github/workflows
+
+  # ///// Security /////
+
+  # govulncheck blocks on a reachable call alone, beside the advisory checks
+  # the dependency-review job runs on every pull request.
+  vulncheck:
+    desc: scan dependencies for known CVEs reachable from this module
+    cmd: go tool govulncheck ./...
+
+  # ///// Behavior /////
+
+  testquick:
+    desc: run the suite without the race detector and with -short, the inner loop
+    cmd: go test -short -count=1 {{.GO_TAG_FLAGS}} {{range splitArgs .TEST_TARGET}}{{shellQuote .}} {{end}}
+
+  # scripts/test-race.sh holds the logic, so a caller with no task runner
+  # covers the same packages and makes the same call about whether the
+  # detector can run at all.
+  #
+  # CC is forwarded here because build forwards it. Without it a value given
+  # on the command line reaches only the task that names it, so this gate
+  # selects a different compiler from the one build just used and nothing
+  # says the two disagree.
+  #
+  # The three arrive as shell assignments prefixing the command rather than
+  # through an `env:` block. An `env:` entry is skipped when the same name is
+  # already exported in the calling shell, so a developer carrying CC or
+  # TEST_TARGET in their environment gets that value whatever the command line
+  # says. A prefix assignment always wins, measured.
+  test:
+    desc: run the full suite under the race detector
+    silent: true
+    cmd: >-
+      CC={{shellQuote .CC}} TAGS={{shellQuote .TAGS}} TEST_TARGET={{shellQuote .TEST_TARGET}}
+      sh scripts/test-race.sh
+
+  coverage:
+    desc: run testquick under coverage and enforce per-package / total thresholds
+    cmds:
+      - go test -coverprofile=coverage.out -covermode=atomic {{.GO_TAG_FLAGS}} {{range splitArgs .TEST_TARGET}}{{shellQuote .}} {{end}}
+      - go tool go-test-coverage --config .testcoverage.yml
+
+  # ///// Artifact /////
+
+  # The twelve settings arrive as shell assignments prefixing the command
+  # rather than through an `env:` block, for the reason test states: an
+  # `env:` entry is skipped when the same name is already exported, and GOOS,
+  # GOARCH, CGO_ENABLED and CC are exactly the names a Go developer carries in
+  # their shell.
+  build:
+    desc: cross-compile binaries into dist/
+    silent: true
+    cmd: >-
+      GOOS={{shellQuote .GOOS}} GOARCH={{shellQuote .GOARCH}} CGO_ENABLED={{shellQuote .CGO_ENABLED}} CC={{shellQuote .CC}}
+      TAGS={{shellQuote .TAGS}} BUILD_TARGET={{shellQuote .BUILD_TARGET}} OUT='dist/'
+      VERSION={{shellQuote .VERSION}} VERSION_PKG={{shellQuote .VERSION_PKG}}
+      REPO_OWNER={{shellQuote .REPO_OWNER}} REPO_NAME={{shellQuote .REPO_NAME}} REMOTE_PKG={{shellQuote .REMOTE_PKG}}
+      sh scripts/build.sh
+
+  # One build per pair in RELEASE_TARGETS, flattened into dist/release/ with
+  # the pair in each file name, which is the flat artifact publish.yml
+  # attaches. cd.yml is the caller; `check` never runs it.
+  release:
+    desc: cross-compile the release binaries for every pair in RELEASE_TARGETS into dist/release/
+    silent: true
+    cmd: >-
+      RELEASE_TARGETS={{shellQuote .RELEASE_TARGETS}} TAGS={{shellQuote .TAGS}} BUILD_TARGET={{shellQuote .RELEASE_PACKAGES}}
+      VERSION={{shellQuote .VERSION}} VERSION_PKG={{shellQuote .VERSION_PKG}}
+      REPO_OWNER={{shellQuote .REPO_OWNER}} REPO_NAME={{shellQuote .REPO_NAME}} REMOTE_PKG={{shellQuote .REMOTE_PKG}}
+      sh scripts/release.sh
+
+  clean:
+    desc: remove build outputs and coverage profile
+    cmd: rm -rf dist/ coverage.out
+
+  # ///// Aggregates /////
+
+  # The gate. CI's gate job runs this same command on Linux, macOS and
+  # Windows, so a green run here is a green run there. `help` prints every
+  # task with what it checks.
+  check:
+    desc: the gate, in phase order (tools, canonical form, static, security, behavior, artifact)
+    cmds:
+      - task: check:quick
+      - task: test
+      - task: coverage
+
+  # The gate without the test suite, which is what the pre-push hook runs. The
+  # race detector and the coverage run are minutes a contributor pays once, in
+  # CI, on every push.
+  check:quick:
+    desc: the gate without the test rows, for the pre-push hook
+    cmds:
+      - task: tools
+      - task: tidy
+      - task: generate
+      - task: format
+      - task: lint
+      - task: vet
+      - task: testpair
+      - task: deadcode
+      - task: workflows
+      - task: vulncheck
+      - task: build

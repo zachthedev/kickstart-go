@@ -1,0 +1,2 @@
+# The main ruleset requires a code owner review, and a path with no owner passes that requirement on every pull request.
+* @zachthedev

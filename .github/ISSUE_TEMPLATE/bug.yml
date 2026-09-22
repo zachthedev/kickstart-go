@@ -1,0 +1,49 @@
+name: Bug
+description: The project does something other than what it documents.
+title: 'bug: '
+labels: ['bug']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This form is for the project doing something other than what its README says it does. A question
+        about using it belongs under the links on the previous page.
+  - type: textarea
+    id: what_happened
+    attributes:
+      label: What happened
+      description: What the project did, and what it was supposed to do instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The commands or actions, in order, with any secret removed. Keep the inputs as sent.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: What was printed, returned or shown. Paste the whole of it rather than the first line.
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The release you ran, or the commit sha for a build from a branch.
+      placeholder: '1.2.3, or 6f9be1d'
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: The operating system and its version, and whatever runtime the project runs on.
+      placeholder: 'Windows 11 24H2, Bun 1.4.2'
+    validations:
+      required: true

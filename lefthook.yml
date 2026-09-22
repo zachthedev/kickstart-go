@@ -1,0 +1,48 @@
+# Git hooks, installed once after cloning with `go tool lefthook install`.
+# lefthook is a go.mod tool directive, so the hook scripts resolve it through
+# `go tool` and nothing is fetched at commit time. commitlint is a package.json
+# pin and resolves through `bunx --no-install`, so a clone with no node_modules
+# refuses every commit until `bun install` runs.
+glob_matcher: doublestar
+
+commit-msg:
+  jobs:
+    # {1} is the message file git hands the hook. The type list comes from the
+    # Conventional Commits specification and the scopes from
+    # .github/commit-scopes.json, both by way of commitlint.config.js.
+    - name: commitlint
+      run: bunx --no-install commitlint --edit {1}
+
+pre-commit:
+  jobs:
+    # generate runs first so downstream jobs see fresh output. The skip
+    # clause short-circuits when no staged file matches any registered
+    # input pattern, so pre-commit stays fast on unrelated changes.
+    - name: generate
+      skip:
+        - run: >-
+            regex=$(go run ./cmd/generate list input-regexp)
+            && [ -n "$regex" ]
+            && ! git diff --cached --name-only | grep -qE "$regex"
+      run: go tool task generate
+
+    - name: checks
+      group:
+        parallel: true
+        jobs:
+          - name: vet
+            glob: '**/*.go'
+            run: go vet ./...
+
+          # -diff prints what `go mod tidy` would change and exits 1, without
+          # writing, so the commit carries only what the author staged.
+          - name: tidy
+            glob: '{**/*.go,go.mod,go.sum}'
+            run: go mod tidy -diff
+
+pre-push:
+  jobs:
+    # The gate without its test rows, which CI runs on every push. It runs
+    # over the working tree, so uncommitted edits count toward the result.
+    - name: check
+      run: go tool task check:quick

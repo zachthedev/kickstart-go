@@ -1,0 +1,39 @@
+name: Feature
+description: Propose a change to what the project does.
+title: 'feat: '
+labels: ['enhancement']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A proposal is accepted or declined on what it costs the people who maintain and use the project, so
+        the form asks for the problem before the solution.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you cannot do today, or what costs more than it needs to.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: The proposal
+      description: What the project would do instead, from the user's side. An interface sketch is welcome.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: What you tried or considered, and why it falls short.
+  - type: dropdown
+    id: contribution
+    attributes:
+      label: Would you open the pull request?
+      options:
+        - 'Yes'
+        - 'No'
+        - With guidance
+    validations:
+      required: true

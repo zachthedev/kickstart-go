@@ -1,0 +1,100 @@
+# ///////////////////////////////////////////////
+# Project
+# ///////////////////////////////////////////////
+#
+# Everything this project ignores on its own account. The upstream block
+# below is a swappable unit, so anything added here stays here through a
+# refresh.
+
+# Build output
+dist/
+*.exe
+*.test
+*.out
+
+# Coverage. The upstream block covers these too, under *.out, coverage.*
+# and *.coverprofile. They are spelled out here because the coverage task
+# and .testcoverage.yml name these exact files, so this section stays
+# readable on its own.
+coverage.out
+coverage.txt
+coverage.html
+*.coverprofile
+
+# The commitlint and Prettier install package.json names
+node_modules/
+
+# IDE. Upstream ships the first two commented out; the rest it omits.
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local-only notes (not committed)
+*.local.md
+*.local.*
+
+# Operator's own build settings. .env.template is generated and committed.
+.env
+!.env.template
+
+# Per-machine Claude Code settings, beside the committed settings.json
+.claude/settings.local.json
+
+# Code review artifacts (local only)
+.claude/review/
+
+# Worktrees the Claude Code CLI creates inside this repo
+.claude/worktrees/
+
+# ///////////////////////////////////////////////
+# Upstream: github/gitignore, Go.gitignore
+# ///////////////////////////////////////////////
+#
+# From revision 1d7e3275a461, dated 2025-01-12, with one edit: coverage.* is
+# anchored to the root, where the coverage task writes it, because the
+# unanchored pattern also matches a source file named coverage.go in any
+# package. Refresh by replacing everything below this header with the output
+# of the command below, then carry that edit:
+#
+#   gh api repos/github/gitignore/contents/Go.gitignore --jq '.content' | base64 -d
+
+# If you prefer the allow list template instead of the deny list, see community template:
+# https://github.com/github/gitignore/blob/main/community/Golang/Go.AllowList.gitignore
+#
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Code coverage profiles and other test artifacts. Anchored to the root,
+# where the coverage task writes them: an unanchored coverage.* also matches
+# a source file named coverage.go in any package.
+*.out
+/coverage.*
+*.coverprofile
+profile.cov
+
+# Dependency directories (remove the comment below to include it)
+# vendor/
+
+# Go workspace file
+go.work
+go.work.sum
+
+# env file
+.env
+
+# Editor/IDE
+# .idea/
+# .vscode/

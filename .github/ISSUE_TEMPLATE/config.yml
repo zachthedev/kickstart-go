@@ -1,0 +1,11 @@
+# Two forms cover the reports that have a shape. Everything else has a place
+# named below, so the tracker holds defects and proposals and nothing else.
+blank_issues_enabled: false
+contact_links:
+  - name: Getting help
+    url: https://github.com/zachthedev/.github/blob/main/SUPPORT.md
+    about: Where a question about using a project goes, and how long a reply takes.
+  # TODO(kickstart): point this at your repository's SECURITY.md.
+  - name: A security problem
+    url: https://github.com/zachthedev/kickstart-go/blob/main/SECURITY.md
+    about: Report it privately. An issue is public the moment it is opened.
