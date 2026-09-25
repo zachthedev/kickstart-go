@@ -11,6 +11,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// bunfig is the file that holds Bun's install cooldown, which the fixtures
+// carry beside go.mod as the repository does.
+const bunfig = "bunfig.toml"
+
 // intactBunfig is a bunfig.toml holding the install cooldown alone.
 const intactBunfig = "[install]\nminimumReleaseAge = 259200 # 3 days\n"
 
@@ -38,9 +42,10 @@ func TestBunEnvFiles_Gitignored(t *testing.T) {
 
 // Each case hands the check the tracked paths a pull request could commit,
 // with the content of any it reads, and the check must refuse each by name or
-// let it pass. Names differ from the refused ones only in case, or in a
-// character that folds to theirs, wherever a case-insensitive filesystem opens
-// one as the other.
+// let it pass. Names differ from the refused ones only in case wherever a
+// case-insensitive filesystem opens one as the other. A path the shared
+// commits job refuses before a merge passes here: an env file at the root, a
+// node_modules path, an .npmrc, a patchedDependencies key.
 func TestStartupFindings_Tracked(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -48,83 +53,53 @@ func TestStartupFindings_Tracked(t *testing.T) {
 		files   map[string]string
 		wantIn  string
 	}{
-		{name: "Task's env file", tracked: []string{".env"}, wantIn: `".env" is tracked, and Taskfile.yml loads it as .env into every task`},
-		{name: "Task's env file in capitals", tracked: []string{".ENV"}, wantIn: `".ENV" is tracked, and Taskfile.yml loads it as .env into every task`},
-		{name: "a Bun env file", tracked: []string{".env.test.local"}, wantIn: `".env.test.local" is tracked, and Bun loads a file of that name`},
-		{name: "a Bun env file in mixed case", tracked: []string{".Env.Local"}, wantIn: `".Env.Local" is tracked, and Bun loads a file of that name`},
-		{name: "an env file below the root", tracked: []string{"docs/.env"}, wantIn: `"docs/.env" is tracked, and Bun loads a file of that name`},
-		{name: "the env template", tracked: []string{".env.template"}},
-		{name: "an npmrc", tracked: []string{".NPMRC"}, wantIn: `".NPMRC" is tracked, and bun install fetches from the registry an .npmrc names`},
-		{name: "an npmrc below the root", tracked: []string{"docs/.npmrc"}, wantIn: `"docs/.npmrc" is tracked`},
-		{name: "a package under node_modules", tracked: []string{"node_modules/prettier/index.mjs"}, wantIn: `"node_modules/prettier/index.mjs" is tracked under node_modules`},
-		{name: "node_modules in mixed case", tracked: []string{"Node_Modules/.bin/prettier"}, wantIn: `"Node_Modules/.bin/prettier" is tracked under node_modules`},
-		{
-			name: "many paths under node_modules",
-			tracked: []string{
-				"node_modules/a", "node_modules/b", "node_modules/c", "node_modules/d",
-				"node_modules/e", "node_modules/f", "node_modules/g",
-			},
-			wantIn: `"node_modules/e" and 2 more are tracked under node_modules`,
-		},
-		{name: "node_modules below the root", tracked: []string{"docs/node_modules/x/index.js"}, wantIn: `"docs/node_modules/x/index.js" is tracked under node_modules`},
-		{name: "a directory that only starts like node_modules", tracked: []string{"node_modules_notes/a.md"}},
+		{name: "Task's env file at the root, which the commits job refuses", tracked: []string{".env"}},
+		{name: "a Bun env file at the root, which the commits job refuses", tracked: []string{".env.test.local", ".Env.Local"}},
+		{name: "an env file below the root", tracked: []string{"docs/.env"}, wantIn: `"docs/.env" is tracked, and Bun loads a file of that name into its environment from the directory it starts in`},
+		{name: "a Bun env file below the root in mixed case", tracked: []string{"tools/sub/.Env.Production.Local"}, wantIn: `"tools/sub/.Env.Production.Local" is tracked, and Bun loads`},
+		{name: "the env template", tracked: []string{".env.template", "docs/.env.template"}},
+		{name: "a name that only starts like an env file", tracked: []string{"docs/.envrc", "docs/.env.example"}},
+		{name: "an npmrc, which the commits job refuses", tracked: []string{".NPMRC", "docs/.npmrc"}},
+		{name: "a package under node_modules, which the commits job refuses", tracked: []string{"node_modules/prettier/index.mjs", "docs/Node_Modules/x/index.js"}},
 		{name: "a vendor directory", tracked: []string{"vendor/modules.txt"}, wantIn: `"vendor/modules.txt" is tracked under vendor, which go builds from`},
 		{name: "vendor in capitals", tracked: []string{"Vendor/x/y.go"}, wantIn: "is tracked under vendor"},
+		{
+			name:    "many paths under vendor",
+			tracked: []string{"vendor/a", "vendor/b", "vendor/c", "vendor/d", "vendor/e", "vendor/f", "vendor/g"},
+			wantIn:  `"vendor/e" and 2 more are tracked under vendor`,
+		},
 		{name: "a vendor directory below the root, which go never reads", tracked: []string{"docs/vendor/a.md"}},
-		{name: "a package.yaml, whose prettier key the row's named config never reads", tracked: []string{"package.yaml"}},
-		{
-			name:    "a prettier key below the root, which the row's named config never reads",
-			tracked: []string{"docs/package.json"},
-			files:   map[string]string{"docs/package.json": `{"name": "docs", "prettier": "./shared.mjs"}`},
-		},
-		{
-			name:    "a prettier key at the root, which the row's named config never reads",
-			tracked: []string{"package.json"},
-			files:   map[string]string{"package.json": `{"prettier": {}}`},
-		},
+		{name: "a directory that only starts like vendor", tracked: []string{"vendored/a.go"}},
 		{
 			name:    "patchedDependencies at the root",
 			tracked: []string{"package.json"},
 			files:   map[string]string{"package.json": `{"patchedDependencies": {"prettier@3.9.8": "patches/p.patch"}}`},
-			wantIn:  `"package.json" carries patchedDependencies`,
+			wantIn:  `"package.json" carries patchedDependencies, and bun install applies them`,
 		},
 		{
 			name:    "patchedDependencies below the root, even empty",
 			tracked: []string{"docs/package.json"},
 			files:   map[string]string{"docs/package.json": `{"patchedDependencies": {}}`},
-			wantIn:  `"docs/package.json" carries patchedDependencies, and bun install applies them`,
+			wantIn:  `"docs/package.json" carries patchedDependencies`,
 		},
 		{
-			name:    "a commitlint key at the root, which commitlint never reads under --config",
+			name:    "patchedDependencies beside a value nested 300 deep, past the runner's jq and within Bun's reach",
 			tracked: []string{"package.json"},
-			files:   map[string]string{"package.json": `{"commitlint": {"rules": {}}}`},
+			files: map[string]string{"package.json": `{"patchedDependencies": {"left-pad@1.3.0": "patches/p.patch"}, "deep": ` +
+				strings.Repeat("[", 300) + strings.Repeat("]", 300) + `}`},
+			wantIn: `"package.json" carries patchedDependencies`,
 		},
 		{
-			name:    "a cosmiconfig key at the root, which changes nothing under --config",
-			tracked: []string{"package.json"},
-			files:   map[string]string{"package.json": `{"cosmiconfig": {"searchPlaces": ["rt.mjs"]}}`},
-		},
-		{
-			name:    "a cosmiconfig key below the root, which commitlint never reads",
-			tracked: []string{"docs/package.json"},
-			files:   map[string]string{"docs/package.json": `{"cosmiconfig": {}}`},
-		},
-		{
-			name:    "a commitlint key below the root, which commitlint never reads",
-			tracked: []string{"docs/package.json"},
-			files:   map[string]string{"docs/package.json": `{"commitlint": {}}`},
-		},
-		{
-			name:    "a duplicated patchedDependencies, where Bun reads the first and Go the last",
+			name:    "a duplicated patchedDependencies, where Bun reads the first and jq and Go the last",
 			tracked: []string{"package.json"},
 			files:   map[string]string{"package.json": `{"patchedDependencies": {"prettier@3.9.8": "p.patch"}, "name": "x", "patchedDependencies": null}`},
 			wantIn:  `"package.json" is not valid JSON under RFC 7493, which refuses a duplicated key at any depth`,
 		},
 		{
-			name:    "a duplicated key nested deep",
-			tracked: []string{"docs/package.json"},
-			files:   map[string]string{"docs/package.json": `{"devDependencies": {"prettier": "3.9.8", "prettier": "3.0.0"}}`},
-			wantIn:  "refuses a duplicated key at any depth",
+			name:    "a duplicated key nested deep, below the root, in capitals",
+			tracked: []string{"docs/PACKAGE.JSON"},
+			files:   map[string]string{"docs/PACKAGE.JSON": `{"devDependencies": {"prettier": "3.9.8", "prettier": "3.0.0"}}`},
+			wantIn:  `"docs/PACKAGE.JSON" is not valid JSON under RFC 7493`,
 		},
 		{
 			name:    "a duplicate spelled with an escape",
@@ -133,18 +108,46 @@ func TestStartupFindings_Tracked(t *testing.T) {
 			wantIn:  "refuses a duplicated key at any depth",
 		},
 		{
-			name:    "a package.json that is not an object",
+			name:    "a package.json that does not parse",
+			tracked: []string{"package.json"},
+			files:   map[string]string{"package.json": `{"name": `},
+			wantIn:  `"package.json" is not valid JSON under RFC 7493`,
+		},
+		{
+			name:    "a cosmiconfig key at the root, whose $import runs a module inside commitlint",
+			tracked: []string{"package.json"},
+			files:   map[string]string{"package.json": `{"name": "x", "cosmiconfig": {"$import": ["./probe.mjs", "./absent.json"]}}`},
+			wantIn:  `"package.json" carries a cosmiconfig key, which cosmiconfig reads as commitlint's meta config whatever config commitlint names`,
+		},
+		{
+			name:    "an empty cosmiconfig key at the root",
+			tracked: []string{"package.json"},
+			files:   map[string]string{"package.json": `{"cosmiconfig": {}}`},
+			wantIn:  `"package.json" carries a cosmiconfig key`,
+		},
+		{
+			name:    "a cosmiconfig key below the root, which commitlint never reads",
 			tracked: []string{"docs/package.json"},
-			files:   map[string]string{"docs/package.json": `["prettier"]`},
+			files:   map[string]string{"docs/package.json": `{"cosmiconfig": {"$import": ["./probe.mjs"]}}`},
+		},
+		{
+			name:    "a key that only names cosmiconfig in its value",
+			tracked: []string{"package.json"},
+			files:   map[string]string{"package.json": `{"description": "cosmiconfig"}`},
+		},
+		{
+			name:    "a package.json that is not an object, which jq's has fails on",
+			tracked: []string{"docs/package.json"},
+			files:   map[string]string{"docs/package.json": `["patchedDependencies"]`},
 			wantIn:  `"docs/package.json" is not a JSON object`,
 		},
 		{
 			name:    "the root package.json as it stands",
 			tracked: []string{"package.json"},
-			files:   map[string]string{"package.json": `{"name": "kickstart-go", "devDependencies": {"prettier": "3.9.8"}}`},
+			files:   map[string]string{"package.json": `{"name": "kickstart-go", "scripts": {"audit": "bun audit --audit-level=high"}, "devDependencies": {"prettier": "3.9.8"}}`},
 		},
 		{name: "a tracked package.json the work tree deleted", tracked: []string{"docs/package.json"}},
-		{name: "a file whose name only mentions Prettier", tracked: []string{"docs/prettierrc.md", "README.md"}},
+		{name: "a file whose name only mentions a package", tracked: []string{"docs/package.json.md", "README.md"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -165,54 +168,12 @@ func TestStartupFindings_Tracked(t *testing.T) {
 			assert.Contains(t, found[0], tt.wantIn)
 		})
 	}
-}
 
-// Each case writes bunfig.toml as a pull request could, and the check must
-// refuse any key but [install] minimumReleaseAge, whatever its value, and
-// pass a missing file.
-func TestStartupFindings_Bunfig(t *testing.T) {
-	tests := []struct {
-		name   string
-		bunfig *string
-		wantIn string
-	}{
-		{name: "intact"},
-		{name: "a top-level preload", bunfig: new("preload = [\"./x.mjs\"]\n" + intactBunfig), wantIn: `bunfig.toml carries "preload"`},
-		{name: "a test preload", bunfig: new(intactBunfig + "[test]\npreload = [\"./x.mjs\"]\n"), wantIn: `bunfig.toml carries "test"`},
-		{name: "a define table", bunfig: new(intactBunfig + "[define]\n\"process.env.X\" = \"'y'\"\n"), wantIn: `bunfig.toml carries "define"`},
-		{name: "another install key", bunfig: new(intactBunfig + "registry = \"https://registry.invalid/\"\n"), wantIn: `bunfig.toml [install] carries "registry"`},
-		{name: "another cooldown, a content change for the code owner", bunfig: new("[install]\nminimumReleaseAge = 0\n")},
-		{name: "no install table", bunfig: new("# nothing\n")},
-		{name: "bunfig.toml missing", bunfig: new("")},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			dir := t.TempDir()
-			writeStartupFiles(t, dir)
-			switch {
-			case tt.bunfig == nil:
-			case *tt.bunfig == "":
-				require.NoError(t, os.Remove(filepath.Join(dir, bunfig)))
-			default:
-				require.NoError(t, os.WriteFile(filepath.Join(dir, bunfig), []byte(*tt.bunfig), 0o600))
-			}
-			found, err := startupFindings(dir, nil)
-			require.NoError(t, err)
-			if tt.wantIn == "" {
-				assert.Empty(t, found)
-				return
-			}
-			require.Len(t, found, 1)
-			assert.Contains(t, found[0], tt.wantIn)
-		})
-	}
-
-	t.Run("a bunfig.toml that does not parse is an error", func(t *testing.T) {
+	t.Run("a tracked package.json that is a directory is an error", func(t *testing.T) {
 		dir := t.TempDir()
-		writeStartupFiles(t, dir)
-		require.NoError(t, os.WriteFile(filepath.Join(dir, bunfig), []byte("[install\n"), 0o600))
-		_, err := startupFindings(dir, nil)
-		assert.ErrorContains(t, err, "parsing")
+		require.NoError(t, os.MkdirAll(filepath.Join(dir, "docs", "package.json"), 0o700))
+		_, err := startupFindings(dir, []string{"docs/package.json"})
+		assert.ErrorContains(t, err, "reading docs/package.json")
 	})
 }
 

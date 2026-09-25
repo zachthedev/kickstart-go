@@ -144,8 +144,10 @@ func TestGitEnvironment(t *testing.T) {
 	}
 }
 
-// Each case is a spelling a filesystem can open as the name beside it, which
-// fold must key alike, or a different name, which it must keep apart.
+// Each case is a spelling a filesystem can open as the name beside it in
+// another case, which fold must key alike, or a different name, which it must
+// keep apart. A default-ignorable code point stays in the key: the one
+// filesystem that dropped them is HFS+, which current Macs do not use.
 func TestFold(t *testing.T) {
 	tests := []struct {
 		name string
@@ -158,14 +160,9 @@ func TestFold(t *testing.T) {
 		{name: "the Kelvin sign", a: "pac\U0000212Aage.json", b: "package.json", want: true},
 		{name: "a dotless i", a: "prett\U00000131er.config.js", b: "prettier.config.js", want: true},
 		{name: "a sharp s, under the full mapping", a: "cla\U000000DF.toml", b: "class.toml", want: true},
-		{name: "a zero-width space", a: ".e\U0000200Bnv", b: ".env", want: true},
-		{name: "a soft hyphen", a: "go.\U000000ADwork", b: "go.work", want: true},
-		{name: "a variation selector", a: "vendor\U0000FE0F", b: "vendor", want: true},
-		{name: "a byte order mark", a: "\U0000FEFF.config", b: ".config", want: true},
-		{name: "a tag character", a: "lefthook\U000E0041.yml", b: "lefthook.yml", want: true},
-		{name: "an interlinear annotation anchor, which is not ignorable", a: "go.work\U0000FFF9", b: "go.work", want: false},
-		{name: "a prepended concatenation mark, which is not ignorable", a: "\U00000600.env", b: ".env", want: false},
-		{name: "a no-break space, which is white space", a: ".env\U000000A0", b: ".env", want: false},
+		{name: "a zero-width space, which the key keeps", a: ".e\U0000200Bnv", b: ".env", want: false},
+		{name: "a soft hyphen, which the key keeps", a: "go.\U000000ADwork", b: "go.work", want: false},
+		{name: "a byte order mark, which the key keeps", a: "\U0000FEFF.config", b: ".config", want: false},
 		{name: "another name", a: ".env.local", b: ".env", want: false},
 	}
 	for _, tt := range tests {
@@ -176,8 +173,8 @@ func TestFold(t *testing.T) {
 }
 
 // Each case plants one entry at the root, and the check must refuse .config,
-// vendor and a lone single quote in any form and any case, and pass
-// everything else.
+// vendor and package.yaml in any form and any case, and pass everything else.
+// A lone single quote is the shared workflows job's to refuse.
 func TestRootFindings(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -191,12 +188,20 @@ func TestRootFindings(t *testing.T) {
 		{name: "a vendor directory", plant: func(t *testing.T, dir string) { mkdir(t, dir, "Vendor") }, wantIn: `"Vendor" sits at the root, and go builds from it`},
 		{name: "a config directory with no dot", plant: func(t *testing.T, dir string) { mkdir(t, dir, "config") }},
 		{name: "a .config below the root", plant: func(t *testing.T, dir string) { mkdir(t, dir, "docs/.config") }},
-		{name: "a directory named by a single quote", plant: func(t *testing.T, dir string) { mkdir(t, dir, "'/tmp") }, wantIn: `"'" sits at the root, and actionlint 1.7.12 looks the whole -shellcheck value up as one program path`},
+		{name: "a package.yaml", plant: func(t *testing.T, dir string) {
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "package.yaml"), []byte("cosmiconfig:\n  $import: [./probe.mjs]\n"), 0o600))
+		}, wantIn: `"package.yaml" sits at the root, and cosmiconfig reads a cosmiconfig key in it as commitlint's meta config`},
+		{name: "a package.yaml in capitals, empty", plant: func(t *testing.T, dir string) {
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "Package.YAML"), nil, 0o600))
+		}, wantIn: `"Package.YAML" sits at the root`},
+		{name: "a package.yaml below the root", plant: func(t *testing.T, dir string) { mkdir(t, dir, "docs/package.yaml") }},
+		{name: "a package.yml, which cosmiconfig never reads", plant: func(t *testing.T, dir string) {
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "package.yml"), nil, 0o600))
+		}},
+		{name: "a directory named by a single quote", plant: func(t *testing.T, dir string) { mkdir(t, dir, "'/tmp") }},
 		{name: "a file named by a single quote", plant: func(t *testing.T, dir string) {
 			require.NoError(t, os.WriteFile(filepath.Join(dir, "'"), nil, 0o600))
-		}, wantIn: `"'" sits at the root`},
-		{name: "a name that opens with a single quote", plant: func(t *testing.T, dir string) { mkdir(t, dir, "'quoted") }},
-		{name: "a single quote below the root", plant: func(t *testing.T, dir string) { mkdir(t, dir, "docs/'") }},
+		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

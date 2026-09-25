@@ -9,9 +9,10 @@ set: [errexit, pipefail]
 
 # Local build settings, loaded into the environment of every task. A missing
 # file is the ordinary case; `.env.template` documents what may go in here.
-# `gate pins` refuses a tracked copy, because every task would load it. This
-# line loads the file before any task's first command, so CI and the push
-# hook run `gate pins` on its own before they start task.
+# The shared commits job refuses a tracked copy before a merge, because every
+# task would load it. CI and the push hook run `gate pins` on its own before
+# they start task, so the tree rules, the duplicate-key check included, run
+# before bun install reads package.json.
 dotenv: ['.env']
 
 # Every go command a task runs reads go.mod alone, never a go.work, which
@@ -155,14 +156,14 @@ tasks:
     desc: apply golangci-lint's formatters (gofumpt and goimports)
     cmd: go tool golangci-lint fmt --config .golangci.yml
 
-  # Prettier owns every file Go does not: YAML, JSON, Markdown. The gate runs
-  # its entry point by path under node_modules with the pinned Bun, so a
-  # checkout without the package fails rather than reaching whatever bunx
-  # would fall back to. It names .prettierrc
-  # and .prettierignore and turns .editorconfig off, so Prettier searches for
-  # no config of its own, and .gitignore narrows nothing. Prettier exits 0
-  # over a tree where it matched nothing, so the gate counts the files it
-  # names and fails on none. `gate pins` holds both files to their text.
+  # Prettier owns every file Go does not: YAML, JSON, Markdown. The gate
+  # starts it through `bun x --bun --no-install` under the pinned Bun, and
+  # first refuses a checkout whose node_modules/.bin holds no Prettier, where
+  # bunx would run a copy from a parent directory, PATH or its cache. It names
+  # .prettierrc and .prettierignore and turns .editorconfig off, so Prettier
+  # searches for no config of its own, and .gitignore narrows nothing. Prettier
+  # exits 0 over a tree where it matched nothing, so the gate counts the files
+  # it names and fails on none.
   format:
     desc: prettier --check over the tree, counting the files it checked
     cmd: go run ./internal/tools/gate format
@@ -182,12 +183,13 @@ tasks:
 
   # vet, lint, deadcode, testpair and build load packages the way go list
   # does and print no count of their own, so this row prints the one count
-  # they share and fails on none. It also fails on a package of this module
-  # a build in LINT_PLATFORMS and LINT_TAGS reaches that ./... skips, on a Go
-  # file under a directory starting with _, on a Go file no such build
-  # compiles, on a release pair LINT_PLATFORMS leaves out, on a lax generated
-  # marker in any tracked Go file but the ones cmd/generate writes, which
-  # golangci-lint would skip whole, and on an inline waiver no linter checks.
+  # they share and fails on none. It also fails on a Go file no build in
+  # LINT_PLATFORMS and LINT_TAGS compiles, on a release pair LINT_PLATFORMS
+  # leaves out, on a lax generated marker in any tracked Go file but the ones
+  # cmd/generate writes, which golangci-lint would skip whole, and on an
+  # inline waiver no linter checks or whose reason is invisible. Its OUTPUTS
+  # variable runs cmd/generate, repository code, so it runs among the code
+  # rows.
   packages:
     desc: count the packages ./... matches and fail on none, on code no lint build reads, or on an unchecked waiver
     vars:
@@ -387,30 +389,45 @@ tasks:
     desc: remove build outputs and coverage profile
     cmd: rm -rf dist/ coverage.out
 
+  # ///// Tree rules /////
+
+  # The tree rules again, after a row that ran repository code, which can
+  # write any file a later row reads. They re-run the named refusals such a
+  # row can plant, such as a second Taskfile, a go.work or a mise config,
+  # and they do not detect a tracked file the row changed.
+  tree:
+    internal: true
+    cmd: go run ./internal/tools/gate pins
+
   # ///// Aggregates /////
 
   # The gate. CI's gate job runs this same command on Linux, macOS and
   # Windows, so a green run here is a green run there. `help` prints every
   # task with what it checks.
   check:
-    desc: the gate, in phase order (tools, canonical form, static, security, behavior, artifact)
+    desc: the gate, the rows meant to run no repository code first, then each code row with the tree rules after it
     cmds:
       - task: check:quick
       - task: test
+      - task: tree
       - task: coverage
+      - task: tree
 
   # The gate without the test suite, which is what the pre-push hook runs. The
   # race detector and the coverage run are minutes a contributor pays once, in
-  # CI, on every push.
+  # CI, on every push. The rows meant to run no repository code go first,
+  # though a review-held .prettierrc plugin or bunfig.toml preload runs in
+  # the format row, and a root ' entry, which the shared workflows job
+  # refuses, runs in the workflows row on Linux and macOS. Then each code row
+  # runs, generate and packages through cmd/generate and build through
+  # scripts/build.sh, with the tree rules after it.
   check:quick:
     desc: the gate without the test rows, for the pre-push hook
     cmds:
       - task: tools
       - task: tidy
-      - task: generate
       - task: format
       - task: toml
-      - task: packages
       - task: lint
       - task: vet
       - task: testpair
@@ -418,4 +435,9 @@ tasks:
       - task: workflows
       - task: scripts
       - task: vulncheck
+      - task: generate
+      - task: tree
+      - task: packages
+      - task: tree
       - task: build
+      - task: tree

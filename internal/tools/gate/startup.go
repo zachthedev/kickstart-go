@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"maps"
 	"os"
 	"path"
 	"path/filepath"
@@ -20,32 +19,17 @@ import (
 // ///////////////////////////////////////////////
 
 const (
-	// autoloadedEnv is the file Taskfile.yml's dotenv loads into every task.
-	// Task sets each variable in it that the environment leaves unset, so a
-	// tracked copy reaches every command a task runs, go included. It is also
-	// the first of bunEnvFiles.
-	autoloadedEnv = ".env"
-	// npmrc names the registry bun install fetches from, read in the directory
-	// the install starts in.
-	npmrc = ".npmrc"
-	// nodeModules is where Bun runs Prettier and commitlint from, each by its
-	// path. bun install keeps a tracked package directory at the locked
-	// version, and Bun then runs it.
-	nodeModules = "node_modules"
 	// vendor is where go builds dependencies from when the directory exists and
 	// no -mod flag says otherwise.
 	vendor = "vendor"
-	// trackedShown is how many tracked paths under node_modules or vendor a
-	// finding names before it counts the rest.
+	// trackedShown is how many tracked paths under vendor a finding names
+	// before it counts the rest.
 	trackedShown = 5
-	// bunfig is the file Bun reads its settings from, in the directory it starts
-	// in. A top-level or [test] preload runs a module before the program Bun
-	// starts, and [define] rewrites the code it runs, so the file holds the
-	// install cooldown alone. It is committed because Renovate's lock file
-	// maintenance runs bun install in a container with no user-level config.
-	bunfig = "bunfig.toml"
 	// excerptBytes is how much of a file's text a finding quotes.
 	excerptBytes = 200
+	// metaConfigKey is the key cosmiconfig reads its meta config from in the
+	// root package.json and package.yaml.
+	metaConfigKey = "cosmiconfig"
 )
 
 // ///////////////////////////////////////////////
@@ -53,9 +37,10 @@ const (
 // ///////////////////////////////////////////////
 
 // bunEnvFiles are the files Bun 1.4.2 loads into its environment at startup,
-// from the directory it starts in: the plain pair and each mode's pair.
+// from the directory it starts in: the plain pair and each mode's pair. The
+// first is also the file Taskfile.yml's dotenv loads into every task.
 var bunEnvFiles = []string{
-	autoloadedEnv, ".env.local",
+	".env", ".env.local",
 	".env.development", ".env.development.local",
 	".env.production", ".env.production.local",
 	".env.test", ".env.test.local",
@@ -65,31 +50,31 @@ var bunEnvFiles = []string{
 // The checks
 // ///////////////////////////////////////////////
 
-// startupFindings refuses what the programs the gate starts read from the
-// checkout before any check of their own. Among tracked, which names every
-// tracked path, it refuses Task's and Bun's env files, an .npmrc, anything
-// under node_modules, and patchedDependencies in any package.json, which
-// changes the code Bun installs. It refuses any bunfig.toml key
-// but [install] minimumReleaseAge. Names compare through fold, because a
-// case-insensitive filesystem opens a tracked .ENV as .env. A contributor's
-// own untracked file passes.
+// startupFindings refuses what the shared commits job leaves to the gate among
+// the tracked files a program reads before any check of its own. The commits
+// job refuses an env file at the root, a node_modules path, an .npmrc, a
+// patchedDependencies key and a bunfig.toml key before a merge. This refuses
+// the rest:
+//
+//   - an env file Bun loads, below the root, which the commits job reads at the
+//     root alone
+//   - a package.json carrying a duplicated key at any depth, one that is no
+//     JSON object, one carrying patchedDependencies, which the commits job's
+//     check passes when jq fails, and a root one carrying a cosmiconfig key,
+//     which the commits job reads nowhere
+//   - a vendor directory at the root, which go builds from in place of the
+//     module cache unless a -mod flag says otherwise, while CI's gate sets
+//     -mod=readonly
+//
+// Names compare through fold, because a case-insensitive filesystem opens a
+// tracked .ENV as .env. A contributor's own untracked file passes.
 func startupFindings(dir string, tracked []string) ([]string, error) {
-	var found, modules, vendored []string
-	isEnv := func(base string) bool {
-		return slices.ContainsFunc(bunEnvFiles, func(env string) bool { return base == fold(env) })
-	}
+	var found, vendored []string
 	for _, name := range tracked {
 		key, base := fold(name), fold(path.Base(name))
 		switch {
-		case key == fold(autoloadedEnv):
-			found = append(found, fmt.Sprintf("%q is tracked, and Taskfile.yml loads it as %s into every task, where it can set GOFLAGS for every go command. Remove it from the index with git rm --cached",
-				name, autoloadedEnv))
-		case isEnv(base):
+		case path.Dir(name) != "." && slices.ContainsFunc(bunEnvFiles, func(env string) bool { return base == fold(env) }):
 			found = append(found, fmt.Sprintf("%q is tracked, and Bun loads a file of that name into its environment from the directory it starts in. Remove it from the index with git rm --cached", name))
-		case base == fold(npmrc):
-			found = append(found, fmt.Sprintf("%q is tracked, and bun install fetches from the registry an .npmrc names. Remove it from the index with git rm --cached", name))
-		case slices.Contains(strings.Split(key, "/"), fold(nodeModules)):
-			modules = append(modules, strconv.Quote(name))
 		case key == fold(vendor) || strings.HasPrefix(key, fold(vendor)+"/"):
 			vendored = append(vendored, strconv.Quote(name))
 		case base == fold("package.json"):
@@ -100,17 +85,10 @@ func startupFindings(dir string, tracked []string) ([]string, error) {
 			found = append(found, refused...)
 		}
 	}
-	if len(modules) > 0 {
-		found = append(found, trackedUnder(modules, nodeModules, "which bun install keeps and Bun runs"))
-	}
 	if len(vendored) > 0 {
 		found = append(found, trackedUnder(vendored, vendor, "which go builds from in place of the module cache unless a -mod flag says otherwise"))
 	}
-	whole, err := bunfigFindings(dir)
-	if err != nil {
-		return nil, err
-	}
-	return append(found, whole...), nil
+	return found, nil
 }
 
 // trackedUnder names the first few quoted paths under dir and counts the
@@ -129,11 +107,19 @@ func trackedUnder(quoted []string, dir, why string) string {
 		strings.Join(shown, ", "), more, verb, dir, why)
 }
 
-// packageFindings refuses patchedDependencies in the tracked package.json at
-// name, which bun install applies to the code of the packages it installs,
-// Prettier's and commitlint's included, and which nothing here needs at any
-// depth. A tracked file the work tree has deleted passes, because nothing can
-// read it.
+// packageFindings refuses the tracked package.json at name when it is not
+// valid JSON under RFC 7493, which refuses a duplicated key at any depth. Bun
+// keeps the first copy of a key, while jq, which the shared commits job reads
+// the file with, and Go keep the last, so a duplicate lets a check read a value
+// Bun never uses. It refuses patchedDependencies, which bun install applies to
+// the code of the packages it installs, even frozen and without scripts. The
+// shared commits job checks that key with jq inside a test, where a jq failure
+// passes the file, and the runner's jq stops at a depth of 256 while Bun reads
+// 10,000, so the gate keeps this copy until that step fails closed on a jq
+// error. At the root it also refuses a cosmiconfig key: commitlint searches
+// through cosmiconfig, which reads that key as its meta config whatever config
+// commitlint names, and an $import there runs a module. A tracked file the
+// work tree has deleted passes, because nothing can read it.
 func packageFindings(dir, name string) ([]string, error) {
 	data, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(name)))
 	if errors.Is(err, fs.ErrNotExist) {
@@ -142,10 +128,8 @@ func packageFindings(dir, name string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("reading %s: %w", name, err)
 	}
-	// Bun keeps the first of a duplicated key and encoding/json the last, so a
-	// file carrying one reads differently to the two.
 	if !jsontext.Value(data).IsValid() {
-		return []string{fmt.Sprintf("%q is not valid JSON under RFC 7493, which refuses a duplicated key at any depth. Bun keeps the first copy of a key and Go the last, so nothing here can tell what Bun reads", name)}, nil
+		return []string{fmt.Sprintf("%q is not valid JSON under RFC 7493, which refuses a duplicated key at any depth. Bun keeps the first copy of a key and jq and Go the last, so no check can tell what Bun reads", name)}, nil
 	}
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(data, &fields); err != nil {
@@ -155,33 +139,8 @@ func packageFindings(dir, name string) ([]string, error) {
 	if _, ok := fields["patchedDependencies"]; ok {
 		found = append(found, fmt.Sprintf("%q carries patchedDependencies, and bun install applies them to the code of the packages it installs, the ones the gate and the hooks run included. Remove the key", name))
 	}
-	return found, nil
-}
-
-// bunfigFindings refuses any bunfig.toml key but [install] minimumReleaseAge.
-// Bun reads the root bunfig.toml each time it starts, and a top-level preload,
-// a [test] preload or [define] runs or rewrites code before the program Bun
-// starts. A missing file passes.
-func bunfigFindings(dir string) ([]string, error) {
-	var raw map[string]any
-	err := decodeTOML(filepath.Join(dir, bunfig), &raw)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	var found []string
-	for _, key := range slices.Sorted(maps.Keys(raw)) {
-		if key != "install" {
-			found = append(found, fmt.Sprintf("%s carries %q, and it holds [install] minimumReleaseAge alone. Bun acts on a preload or a define before the program it starts", bunfig, key))
-		}
-	}
-	install, _ := raw["install"].(map[string]any)
-	for _, key := range slices.Sorted(maps.Keys(install)) {
-		if key != "minimumReleaseAge" {
-			found = append(found, fmt.Sprintf("%s [install] carries %q, and it holds minimumReleaseAge alone", bunfig, key))
-		}
+	if _, ok := fields[metaConfigKey]; ok && path.Dir(name) == "." {
+		found = append(found, fmt.Sprintf("%q carries a %s key, which cosmiconfig reads as commitlint's meta config whatever config commitlint names, and an $import there runs a module. Remove the key", name, metaConfigKey))
 	}
 	return found, nil
 }

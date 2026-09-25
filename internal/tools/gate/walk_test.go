@@ -13,11 +13,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// prettierArgs is the command line the format row hands bun. --no-env-file
-// comes before the entry point, where Bun reads its own flags.
+// prettierArgs is the command line the format row hands bun: bunx under the
+// pinned Bun, then Prettier's own arguments.
 var prettierArgs = []string{
-	"--no-env-file", "./node_modules/prettier/bin/prettier.cjs", "--check", "--debug-check",
+	"x", "--bun", "--no-install", "prettier", "--check", "--debug-check",
 	"--no-editorconfig", "--config", ".prettierrc", "--ignore-path", ".prettierignore", ".",
+}
+
+// installPrettier writes the command bun install puts in node_modules/.bin for
+// Prettier on this platform under root.
+func installPrettier(t *testing.T, root string) {
+	t.Helper()
+	bin := filepath.Join(root, "node_modules", ".bin")
+	require.NoError(t, os.MkdirAll(bin, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(bin, programName("prettier")), nil, 0o600))
 }
 
 // cutArgs splits args around the first sep, as a program reading "--" does.
@@ -122,6 +131,11 @@ func TestTomlFindings(t *testing.T) {
 			out:    output{stderr: []byte(` INFO found files total=1 excluded=0 files=["a\tb"]` + "\n")},
 			wantIn: []string{"taplo's found files line cannot be read back"}, wantRelay: true,
 		},
+		{
+			name: "taplo that stops before listing a file, reported as its exit alone", tracked: []string{".taplo.toml"},
+			out:    output{stderr: []byte("ERROR invalid configuration\n"), code: 1},
+			wantIn: []string{"taplo exited 1"}, wantRelay: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -134,9 +148,7 @@ func TestTomlFindings(t *testing.T) {
 			if tt.wantSummary != "" {
 				assert.Equal(t, tt.wantSummary, result.summary)
 			}
-			if len(tt.wantIn) == 0 {
-				assert.Empty(t, result.findings)
-			}
+			require.Len(t, result.findings, len(tt.wantIn), "findings: %q", result.findings)
 			for _, want := range tt.wantIn {
 				assert.True(t, slices.ContainsFunc(result.findings, func(f string) bool { return strings.Contains(f, want) }), "want a finding containing %q in %q", want, result.findings)
 			}
@@ -169,6 +181,7 @@ func TestFormatFindings(t *testing.T) {
 	root := t.TempDir()
 	writeFiles(t, root, "a.md", "docs/b.yml")
 	require.NoError(t, os.Mkdir(filepath.Join(root, "dir"), 0o700))
+	installPrettier(t, root)
 
 	tests := []struct {
 		name        string
@@ -201,6 +214,11 @@ func TestFormatFindings(t *testing.T) {
 			out:    output{stdout: []byte("Checking formatting...\na.md\n"), stderr: []byte("[warn] a.md\n"), code: 1},
 			wantIn: []string{"prettier exited 1"},
 		},
+		{
+			name:   "Prettier that fails before it names a file, reported as its exit alone",
+			out:    output{stderr: []byte("[error] Invalid configuration\n"), code: 2},
+			wantIn: []string{"prettier exited 2"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -221,6 +239,7 @@ func TestFormatFindings(t *testing.T) {
 				return
 			}
 			assert.Equal(t, tt.out.stderr, result.relay)
+			require.Len(t, result.findings, len(tt.wantIn), "findings: %q", result.findings)
 			for _, want := range tt.wantIn {
 				assert.True(t, slices.ContainsFunc(result.findings, func(f string) bool { return strings.Contains(f, want) }), "want a finding containing %q in %q", want, result.findings)
 			}
@@ -232,6 +251,67 @@ func TestFormatFindings(t *testing.T) {
 		_, err := formatFindings(run, "bun-path", root)
 		assert.ErrorContains(t, err, "running bun-path")
 	})
+	t.Run("Prettier not installed, so bunx never starts", func(t *testing.T) {
+		run := func(string, []string, ...string) (output, error) {
+			t.Fatal("bunx must not start before the install holds Prettier")
+			return output{}, nil
+		}
+		_, err := formatFindings(run, "bun-path", t.TempDir())
+		assert.EqualError(t, err, "prettier is not installed in this checkout: run bun install --frozen-lockfile, or bun install --frozen-lockfile --ignore-scripts in a worktree (CONTRIBUTING.md#setup)")
+	})
+}
+
+// Each case plants what node_modules/.bin holds for a tool, and the check must
+// pass only a command that resolves to a regular file under the name the
+// install writes on that platform, and refuse the rest with the set's message.
+func TestInstalledTool(t *testing.T) {
+	message := "prettier is not installed in this checkout: run bun install --frozen-lockfile, or bun install --frozen-lockfile --ignore-scripts in a worktree (CONTRIBUTING.md#setup)"
+	tests := []struct {
+		name    string
+		goos    string
+		plant   func(t *testing.T, bin string)
+		wantErr bool
+	}{
+		{name: "the Windows command", goos: "windows", plant: func(t *testing.T, bin string) { writeFiles(t, bin, "prettier.exe") }},
+		{name: "the command elsewhere", goos: "linux", plant: func(t *testing.T, bin string) { writeFiles(t, bin, "prettier") }},
+		{name: "no node_modules at all", goos: "linux", plant: func(*testing.T, string) {}, wantErr: true},
+		{name: "another tool's command alone", goos: "linux", plant: func(t *testing.T, bin string) { writeFiles(t, bin, "commitlint") }, wantErr: true},
+		{name: "the bare name on Windows, where bun install writes prettier.exe", goos: "windows", plant: func(t *testing.T, bin string) { writeFiles(t, bin, "prettier", "prettier.bunx") }, wantErr: true},
+		{name: "the .exe elsewhere, which is not the command", goos: "darwin", plant: func(t *testing.T, bin string) { writeFiles(t, bin, "prettier.exe") }, wantErr: true},
+		{name: "a directory in the command's place", goos: "linux", plant: func(t *testing.T, bin string) { require.NoError(t, os.MkdirAll(filepath.Join(bin, "prettier"), 0o700)) }, wantErr: true},
+		{
+			name: "a link to the package's entry, as bun install writes it", goos: "linux",
+			plant: func(t *testing.T, bin string) {
+				writeFiles(t, filepath.Dir(bin), "prettier/bin/prettier.cjs")
+				require.NoError(t, os.MkdirAll(bin, 0o700))
+				if err := os.Symlink(filepath.Join("..", "prettier", "bin", "prettier.cjs"), filepath.Join(bin, "prettier")); err != nil {
+					t.Skipf("this machine cannot create a symlink, so the link cannot be planted: %v", err)
+				}
+			},
+		},
+		{
+			name: "a link a removed package left behind", goos: "linux",
+			plant: func(t *testing.T, bin string) {
+				require.NoError(t, os.MkdirAll(bin, 0o700))
+				if err := os.Symlink(filepath.Join("..", "prettier", "bin", "prettier.cjs"), filepath.Join(bin, "prettier")); err != nil {
+					t.Skipf("this machine cannot create a symlink, so the link cannot be planted: %v", err)
+				}
+			},
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			tt.plant(t, filepath.Join(root, "node_modules", ".bin"))
+			err := installedTool(root, "prettier", tt.goos)
+			if tt.wantErr {
+				assert.EqualError(t, err, message)
+				return
+			}
+			assert.NoError(t, err)
+		})
+	}
 }
 
 // fakeActionlintRunner plays actionlint over the files after --: it checks the
@@ -378,8 +458,11 @@ func TestShellFindings(t *testing.T) {
 		{name: "a value behind an alias", content: "x: &custom /bin/bash -e {0}\njobs:\n  a:\n    steps:\n      - run: echo\n        shell: *custom\n", wantIn: []string{`"/bin/bash -e {0}"`}},
 		{name: "a value behind escapes", content: "jobs:\n  a:\n    steps:\n      - run: echo\n        shell: \"\\x2Fbin/bash {0}\"\n", wantIn: []string{`"/bin/bash {0}"`}},
 		{name: "a job named by a number", content: "jobs:\n  1:\n    steps:\n      - run: echo\n        shell: fish\n", wantIn: []string{`sets jobs.1.steps[0].shell to "fish"`}},
-		{name: "an empty shell", content: "jobs:\n  a:\n    steps:\n      - run: echo\n        shell:\n", wantIn: []string{"sets jobs.a.steps[0].shell to <nil>"}},
-		{name: "a shell that is not text", content: "jobs:\n  a:\n    steps:\n      - run: echo\n        shell: [bash]\n", wantIn: []string{"sets jobs.a.steps[0].shell to [bash]"}},
+		{name: "a job id carrying an escape sequence", content: "jobs:\n  \"a\\e[2J\\r\":\n    steps:\n      - run: echo\n        shell: fish\n", wantIn: []string{`sets jobs.a\x1b[2J\r.steps[0].shell to "fish"`}},
+		{name: "a job default under an id carrying a newline", content: "jobs:\n  \"b\\nc\":\n    defaults:\n      run:\n        shell: cmd\n", wantIn: []string{`sets jobs.b\nc.defaults.run.shell to "cmd"`}},
+		{name: "a value that is not text carrying an escape sequence", content: "jobs:\n  a:\n    steps:\n      - run: echo\n        shell: [\"\\e[2J\"]\n", wantIn: []string{`sets jobs.a.steps[0].shell to "[\x1b[2J]"`}},
+		{name: "an empty shell", content: "jobs:\n  a:\n    steps:\n      - run: echo\n        shell:\n", wantIn: []string{`sets jobs.a.steps[0].shell to "<nil>"`}},
+		{name: "a shell that is not text", content: "jobs:\n  a:\n    steps:\n      - run: echo\n        shell: [bash]\n", wantIn: []string{`sets jobs.a.steps[0].shell to "[bash]"`}},
 		{name: "a second document", content: "on: push\n---\njobs:\n  a:\n    steps:\n      - run: echo\n        shell: fish\n", wantIn: []string{`"fish"`}},
 		{name: "YAML that does not parse", content: "jobs:\n  a: [\n", wantIn: []string{"does not parse as YAML"}},
 		{name: "a duplicated key", content: "jobs:\n  a:\n    steps: []\n    steps: []\n", wantIn: []string{"does not parse as YAML"}},
@@ -473,8 +556,9 @@ func TestCountFiles(t *testing.T) {
 }
 
 // Each case hands the check tracked paths, with the content of any it reads,
-// and the check must refuse each path a row would skip without a change to a
-// held file, and let every other path pass.
+// and the check must refuse a workflow whose extension is not a lowercase
+// .yml and an inline zizmor waiver anywhere under .github, and let every other
+// path pass. A path under a version control directory is review's to refuse.
 func TestWalkedFindings(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -482,22 +566,29 @@ func TestWalkedFindings(t *testing.T) {
 		files   map[string]string
 		wantIn  string
 	}{
-		{name: "a path under .git", tracked: []string{"docs/.git/notes.md"}, wantIn: `"docs/.git/notes.md" sits under a .git directory, which Prettier's walk skips`},
-		{name: "a path under .jj in capitals", tracked: []string{".JJ/repo/x.yml"}, wantIn: "sits under a .jj directory"},
-		{name: "a path under .svn", tracked: []string{"a/.svn/b"}, wantIn: "sits under a .svn directory"},
-		{name: "names that only start like a skipped directory", tracked: []string{".gitignore", ".gitattributes", ".github/CODEOWNERS", "docs/.hgrc"}},
 		{name: "a workflow in capitals", tracked: []string{".github/workflows/UP.YML"}, wantIn: `".github/workflows/UP.YML" is a workflow named .YML, and every workflow here ends in .yml`},
 		{name: "a workflow named .yaml", tracked: []string{".github/workflows/ci.yaml"}, wantIn: "is a workflow named .yaml"},
+		{name: "a workflow directory in capitals", tracked: []string{".GitHub/Workflows/cd.Yml"}, wantIn: "is a workflow named .Yml"},
 		{name: "a workflow named .yml", tracked: []string{".github/workflows/ci.yml"}},
 		{name: "a YAML file beside the workflows", tracked: []string{".github/dependabot.YAML"}},
+		{name: "a YAML file one level below the workflows", tracked: []string{".github/workflows/nested/x.YAML"}},
+		{name: "a path under a version control directory, which review holds", tracked: []string{"docs/.git/notes.md", ".JJ/repo/x.yml"}},
 		{
 			name: "an inline zizmor waiver in a workflow", tracked: []string{".github/workflows/cd.yml"},
 			files:  map[string]string{".github/workflows/cd.yml": "jobs:\n  a:\n    secrets: inherit # zizmor: ignore[secrets-inherit]\n"},
 			wantIn: `".github/workflows/cd.yml" carries an inline zizmor ignore comment, which waives an audit outside .github/zizmor.yml`,
 		},
 		{
-			name: "an inline waiver spelled another way", tracked: []string{".github/actions/x/action.yml"},
-			files:  map[string]string{".github/actions/x/action.yml": "runs: # ZIZMOR:ignore[unpinned-uses]\n"},
+			name: "an inline waiver in a file .gitattributes marks binary, which git grep -I skips", tracked: []string{".gitattributes", ".github/workflows/cd.yml"},
+			files: map[string]string{
+				".gitattributes":           ".github/workflows/cd.yml -diff\n",
+				".github/workflows/cd.yml": "jobs:\n  a:\n    secrets: inherit # zizmor: ignore[secrets-inherit]\n",
+			},
+			wantIn: `".github/workflows/cd.yml" carries an inline zizmor ignore comment`,
+		},
+		{
+			name: "an inline waiver spelled another way, in a directory in capitals", tracked: []string{".GitHub/actions/x/action.yml"},
+			files:  map[string]string{".GitHub/actions/x/action.yml": "runs: # ZIZMOR:ignore[unpinned-uses]\n"},
 			wantIn: "carries an inline zizmor ignore comment",
 		},
 		{
@@ -509,10 +600,6 @@ func TestWalkedFindings(t *testing.T) {
 			files: map[string]string{zizmorConfig: "rules:\n  secrets-inherit:\n    ignore:\n      - cd.yml\n"},
 		},
 		{name: "a tracked file the work tree deleted", tracked: []string{".github/workflows/gone.yml"}},
-		{
-			name: "a shellcheck directive in a workflow, which the stand-in refuses in the decoded script", tracked: []string{".github/workflows/ci.yml"},
-			files: map[string]string{".github/workflows/ci.yml": "jobs:\n  a:\n    steps:\n      - run: |\n          # shellcheck disable=all\n          echo $X\n"},
-		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -539,4 +626,23 @@ func TestWalkedFindings(t *testing.T) {
 		_, err := walkedFindings(dir, []string{".github/x"})
 		assert.ErrorContains(t, err, "reading .github/x")
 	})
+}
+
+func TestEscaped(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "plain text", in: "build", want: "build"},
+		{name: "an escape sequence", in: "a\x1b[2Jb", want: `a\x1b[2Jb`},
+		{name: "a carriage return and a newline", in: "a\r\nb", want: `a\r\nb`},
+		{name: "a quote and a backslash", in: `a"b\c`, want: `a\"b\\c`},
+		{name: "text beyond ASCII", in: "Zoë", want: "Zoë"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, escaped(tt.in))
+		})
+	}
 }

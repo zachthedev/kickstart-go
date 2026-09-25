@@ -6,7 +6,6 @@ import (
 	"path"
 	"path/filepath"
 	"slices"
-	"strings"
 )
 
 // ///////////////////////////////////////////////
@@ -47,9 +46,6 @@ type configSearch struct {
 const (
 	// diskWalked refuses a name wherever the walk of the work tree reaches.
 	diskWalked diskScope = iota
-	// diskPackages refuses a name wherever ./... reaches: the walk less every
-	// directory whose name starts with a dot or an underscore, and testdata.
-	diskPackages
 	// diskRoot refuses a name at the root alone, where the gate starts the
 	// program that reads it.
 	diskRoot
@@ -77,14 +73,20 @@ const (
 	// taskfile is the Taskfile Task reads first. The gate commands name
 	// none, so no other name may exist beside it.
 	taskfile = "Taskfile.yml"
-	// goModule is the one module file. Every ./... row skips a directory
-	// holding another.
+	// goModule is the module file every go command the gate runs reads.
 	goModule = "go.mod"
+	// nodeModules is where bun install puts packages, each with configs of
+	// its own that no program the gate starts reads as the checkout's.
+	nodeModules = "node_modules"
 )
 
 // ///////////////////////////////////////////////
 // Variables
 // ///////////////////////////////////////////////
+
+// skippedDirs are the version control directories every program the gate
+// starts leaves unwalked, Prettier's walk among them.
+var skippedDirs = []string{".git", ".sl", ".svn", ".hg", ".jj"}
 
 // lefthookNames are the main configs lefthook 2.1.14 reads from the root, the
 // first it finds. lefthook also reads .config, which the gate refuses whole.
@@ -106,8 +108,8 @@ var taskNames = []string{
 // configSearches is every config a program the gate or its hooks start finds
 // by searching, where no flag names the one to read: actionlint's, which a
 // run by hand reads, lefthook's and Task's, which take no name from the
-// repository, go's module and workspace files, and the project configs Bun
-// applies to a tool's imports. Prettier, commitlint, golangci-lint, taplo and
+// repository, go's workspace files, and the project configs Bun applies to a
+// tool's imports. Prettier, commitlint, golangci-lint, taplo and
 // zizmor are not here: each row names its config, and naming it stops every
 // other read each tool makes, measured with a planted config of every kind.
 // ShellCheck is not here either: actionlint starts it with --norc, and no
@@ -128,10 +130,6 @@ var configSearches = []configSearch{
 	{
 		what: "a Task config", named: taskfile, atRoot: taskNames,
 		reads: "Task reads another Taskfile when Taskfile.yml is absent, and a .taskrc for its own settings",
-	},
-	{
-		what: "a Go module file below the root", named: goModule, anywhere: []string{goModule}, disk: diskPackages,
-		reads: "every ./... row skips the module it starts, so nothing in the gate checks the code below it",
 	},
 	{
 		what: "a Go workspace file", anywhere: []string{"go.work", "go.work.sum"}, disk: diskRoot,
@@ -204,11 +202,6 @@ func (search configSearch) reachesOnDisk(name string) bool {
 	switch search.disk {
 	case diskWalked:
 		return true
-	case diskPackages:
-		dir := path.Dir(name)
-		return dir == "." || !slices.ContainsFunc(strings.Split(dir, "/"), func(segment string) bool {
-			return strings.HasPrefix(segment, ".") || strings.HasPrefix(segment, "_") || segment == "testdata"
-		})
 	case diskRoot:
 		return path.Dir(name) == "."
 	default:

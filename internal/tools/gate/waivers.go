@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"go/ast"
 	"go/parser"
 	"go/token"
 	"io/fs"
@@ -12,16 +13,25 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"unicode"
 )
 
 // ///////////////////////////////////////////////
 // Constants
 // ///////////////////////////////////////////////
 
-// gosecDisable is the second spelling of gosec's waiver. gosec 2.28.0 reads it
-// where a // comment opens with it, alone or before a space, under the same
-// rule and reason settings as #nosec (analyzer.go, findNoSecDirective).
-const gosecDisable = "gosec:disable"
+const (
+	// gosecDisable is the second spelling of gosec's waiver. gosec 2.28.0 reads
+	// it where a // comment opens with it, alone or before a space, under the
+	// same rule and reason settings as #nosec (analyzer.go, findNoSecDirective).
+	gosecDisable = "gosec:disable"
+	// nosec is gosec's waiver, whose reason follows reasonMarker.
+	nosec = "#nosec"
+	// reasonMarker opens the reason of a #nosec waiver.
+	reasonMarker = "--"
+	// invisibleReasonWhy is what every refusal of an invisible reason says.
+	invisibleReasonWhy = "whose reason holds no letter or number once its invisible code points are dropped, and the linter reads any character as a reason. Write the reason in words"
+)
 
 // ///////////////////////////////////////////////
 // Variables
@@ -67,6 +77,9 @@ func goWaiverFindings(root string, tracked []string) ([]string, error) {
 					found = append(found, fmt.Sprintf("%s:%d carries %q, %s", name, files.Position(comment.Pos()).Line, comment.Text, why))
 				}
 			}
+			if why, waiver := nosecRefusal(group.Text()); why != "" {
+				found = append(found, fmt.Sprintf("%s:%d carries %q, %s", name, nosecLine(files, group), waiver, why))
+			}
 		}
 	}
 	return found, nil
@@ -90,6 +103,9 @@ func goWaiverFindings(root string, tracked []string) ([]string, error) {
 //     gosec waiver reads // #nosec G<nnn> -- reason and nothing else. gosec
 //     honors one spelling of it, and the rest look like a waiver and waive
 //     nothing
+//   - a nolint whose reason is invisible, which nolintlint's
+//     require-explanation accepts when it is made of default-ignorable code
+//     points alone, such as U+200B or U+00AD
 func waiverRefusal(text string) string {
 	if strings.HasPrefix(strings.ToLower(strings.TrimLeft(text, "/* \t\r\n")), gosecDisable) {
 		return "which spells gosec:disable, and a gosec waiver takes one form. Write // #nosec G<nnn> -- reason"
@@ -117,7 +133,71 @@ func waiverRefusal(text string) string {
 	case slices.Contains(linters, "gosec"):
 		return "which waives every gosec rule on the line. Name the rule instead: // #nosec G<nnn> -- reason"
 	}
+	if _, reason, found := strings.Cut(body, "//"); found && invisibleReason(reason) {
+		return invisibleReasonWhy
+	}
 	return ""
+}
+
+// nosecRefusal says why the gate refuses a comment group, as its text reads
+// with the markers dropped, and returns the waiver from #nosec to the group's
+// end, or "" twice for a group it does not refuse. gosec reads a #nosec from
+// the group's text and its reason from after the first --, less any further
+// dashes, and nosec-require-justification accepts a reason made of
+// default-ignorable code points alone. gosec reads #nosec at the start of a
+// line alone, so matching it anywhere refuses more, never less.
+func nosecRefusal(group string) (why, waiver string) {
+	at := strings.Index(group, nosec)
+	if at < 0 {
+		return "", ""
+	}
+	_, reason, found := strings.Cut(group[at+len(nosec):], reasonMarker)
+	if found && invisibleReason(strings.TrimLeft(reason, "-")) {
+		return invisibleReasonWhy, group[at:]
+	}
+	return "", ""
+}
+
+// nosecLine is the line of the first comment in group that carries #nosec,
+// where a reader looks for the waiver, or the group's first line.
+func nosecLine(files *token.FileSet, group *ast.CommentGroup) int {
+	for _, comment := range group.List {
+		if strings.Contains(comment.Text, nosec) {
+			return files.Position(comment.Pos()).Line
+		}
+	}
+	return files.Position(group.Pos()).Line
+}
+
+// invisibleReason reports whether reason holds no letter and no number once
+// every default-ignorable code point is dropped. nolintlint and gosec accept
+// any reason that survives white space trimming, so a reason made of a blank
+// braille cell, a lone combining mark or a private-use point passes them and
+// looks empty on screen. The drop comes first, because the Hangul fillers are
+// letters and default-ignorable at once.
+func invisibleReason(reason string) bool {
+	for _, r := range reason {
+		if !defaultIgnorable(r) && (unicode.IsLetter(r) || unicode.IsNumber(r)) {
+			return false
+		}
+	}
+	return true
+}
+
+// defaultIgnorable reports whether r has Unicode's Default_Ignorable_Code_Point
+// property, derived from the property tables the unicode package carries the
+// way DerivedCoreProperties.txt derives it: Other_Default_Ignorable_Code_Point,
+// format characters and variation selectors, less white space, the
+// interlinear annotation and Egyptian hieroglyph format characters, and the
+// prepended concatenation marks.
+func defaultIgnorable(r rune) bool {
+	switch {
+	case unicode.Is(unicode.White_Space, r), unicode.Is(unicode.Prepended_Concatenation_Mark, r):
+		return false
+	case r >= 0xFFF9 && r <= 0xFFFB, r >= 0x13430 && r <= 0x13440:
+		return false
+	}
+	return unicode.Is(unicode.Other_Default_Ignorable_Code_Point, r) || unicode.Is(unicode.Cf, r) || unicode.Is(unicode.Variation_Selector, r)
 }
 
 // nolintLinters reads a directive's list the way golangci-lint's nolint

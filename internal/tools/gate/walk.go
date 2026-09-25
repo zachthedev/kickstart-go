@@ -11,6 +11,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -56,15 +57,9 @@ const (
 	verbosePrefix = "verbose: "
 	// workflowsDir is where GitHub reads workflows, one level deep.
 	workflowsDir = ".github/workflows"
-	// prettierEntry is the file Prettier 3's package.json names as its bin,
-	// relative to the checkout. The ./ keeps bun from reading it as a package
-	// or script name.
-	prettierEntry = "./node_modules/prettier/bin/prettier.cjs"
-	// noEnvFile goes first on every Bun the gate starts. Bun 1.4.2 loads up to
-	// eight env files at startup, and the flag stops all eight in every mode,
-	// so no untracked env file sets a variable inside Prettier. Task's own .env
-	// still reaches the row through the gate's environment.
-	noEnvFile = "--no-env-file"
+	// installedBin is where bun install puts each package's command, the one
+	// bunx runs.
+	installedBin = "node_modules/.bin"
 )
 
 // ///////////////////////////////////////////////
@@ -84,36 +79,27 @@ var (
 	// other shell the set runs, so any other value, a command line such as
 	// /bin/bash -e {0} included, runs a script no ShellCheck reads.
 	allowedShells = []string{"bash", "sh", "pwsh"}
-	// skippedDirs are the directories Prettier's walk skips without a word,
-	// whatever .prettierignore says.
-	skippedDirs = []string{".git", ".sl", ".svn", ".hg", ".jj"}
 )
 
 // ///////////////////////////////////////////////
 // What the rows walk
 // ///////////////////////////////////////////////
 
-// walkedFindings refuses what would take a tracked file out of a row's walk
-// without a change to a config a row names: a path under a directory
-// Prettier skips, a workflow whose extension is not .yml, an inline zizmor
-// waiver anywhere under .github, which only .github/zizmor.yml may carry.
-// Names compare through fold. The workflows row refuses a ShellCheck directive
-// in a workflow through the stand-in, which reads the decoded script.
+// walkedFindings refuses a tracked workflow whose extension is not a
+// lowercase .yml, which actionlint's file list and zizmor's collection would
+// each skip, and an inline zizmor waiver in any tracked file under .github,
+// which only .github/zizmor.yml may carry. The shared workflows job refuses
+// the waiver with git grep -I, which skips a file .gitattributes marks binary
+// or -diff, so this check reads every file itself. Names compare through fold.
 func walkedFindings(dir string, tracked []string) ([]string, error) {
 	var found []string
 	for _, name := range tracked {
-		key := fold(name)
-		segments := strings.Split(key, "/")
-		if skipped := slices.IndexFunc(skippedDirs, func(skip string) bool { return slices.Contains(segments, fold(skip)) }); skipped >= 0 {
-			found = append(found, fmt.Sprintf("%q sits under a %s directory, which Prettier's walk skips without a word, so the format row never checks it. Move it",
-				name, skippedDirs[skipped]))
-		}
 		ext := path.Ext(name)
 		if fold(path.Dir(name)) == fold(workflowsDir) && (fold(ext) == fold(".yml") || fold(ext) == fold(".yaml")) && ext != ".yml" {
 			found = append(found, fmt.Sprintf("%q is a workflow named %s, and every workflow here ends in .yml, the one spelling actionlint's own list and zizmor's collection both match. Rename it",
 				name, ext))
 		}
-		if !strings.HasPrefix(key, fold(".github")+"/") {
+		if !strings.HasPrefix(fold(name), fold(".github")+"/") {
 			continue
 		}
 		data, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(name)))
@@ -160,8 +146,10 @@ func tomlFindings(run commandRunner, taplo, root string, tracked []string) (rowR
 	switch {
 	case err != nil:
 		result.findings = append(result.findings, fmt.Sprintf("taplo's found files line cannot be read back: %v", err))
-	case !ok:
+	case !ok && out.code == 0:
 		result.findings = append(result.findings, fmt.Sprintf("taplo printed no found files line, so it checked none of the %d TOML files the row handed it. A config that excludes every one does this", len(handed)))
+	case !ok:
+		// taplo stopped before it listed any file, and its exit below is the finding.
 	default:
 		result.findings = append(result.findings, matchChecked(root, handed, listed)...)
 	}
@@ -175,17 +163,19 @@ func tomlFindings(run commandRunner, taplo, root string, tracked []string) (rowR
 }
 
 // formatFindings runs Prettier's check over the tree and counts the files it
-// reports checking. bun runs Prettier's own entry point by its path under
-// node_modules, so a checkout without the package fails the row, where bunx
-// would fall back to PATH, a node_modules/.bin above the checkout, or a copy
-// of the latest release in its cache. --debug-check makes Prettier name each
-// file it formats, and --check beside it still fails a file whose formatting
-// differs. Prettier exits 0 over a tree where it matched nothing, so the count
-// is what proves the row read anything. Every config Prettier would search for
-// is named or turned off: .prettierrc, .prettierignore in place of the
-// .gitignore pair, and no .editorconfig.
+// reports checking. Prettier starts through `bun x --bun --no-install`, bunx
+// under the pinned Bun, which runs the command the install put in
+// node_modules/.bin under Bun rather than a node on PATH, and fetches nothing.
+// --debug-check makes Prettier name each file it formats, and --check beside it
+// still fails a file whose formatting differs. Prettier exits 0 over a tree
+// where it matched nothing, so the count is what proves the row read anything.
+// Every config Prettier would search for is named or turned off: .prettierrc,
+// .prettierignore in place of the .gitignore pair, and no .editorconfig.
 func formatFindings(run commandRunner, bun, root string) (rowResult, error) {
-	out, err := run(bun, nil, noEnvFile, prettierEntry, "--check", "--debug-check",
+	if err := installedTool(root, "prettier", runtime.GOOS); err != nil {
+		return rowResult{}, err
+	}
+	out, err := run(bun, nil, "x", "--bun", "--no-install", "prettier", "--check", "--debug-check",
 		"--no-editorconfig", "--config", prettierrc, "--ignore-path", prettierIgnore, ".")
 	if err != nil {
 		return rowResult{}, fmt.Errorf("running %s: %w", bun, err)
@@ -201,7 +191,7 @@ func formatFindings(run commandRunner, bun, root string) (rowResult, error) {
 		}
 	}
 	result := rowResult{summary: "prettier checked " + countFiles(checked, "")}
-	if checked == 0 {
+	if checked == 0 && out.code == 0 {
 		result.findings = append(result.findings, "Prettier named no file it checked, so the format row checked nothing")
 	}
 	if out.code != 0 {
@@ -211,6 +201,24 @@ func formatFindings(run commandRunner, bun, root string) (rowResult, error) {
 		result.relay = out.stderr
 	}
 	return result, nil
+}
+
+// installedTool refuses a bunx start of tool unless the command the install
+// writes for it resolves, through every link, to a regular file: tool.exe on
+// Windows, and tool elsewhere, where the install writes a link. Without one,
+// bunx runs a copy from a parent directory's node_modules/.bin, from PATH or
+// from its own cache, none of them the version bun.lock pins. A link a removed
+// package left behind points at nothing.
+func installedTool(root, tool, goos string) error {
+	command := tool
+	if goos == "windows" {
+		command += ".exe"
+	}
+	info, err := os.Stat(filepath.Join(root, filepath.FromSlash(installedBin), command))
+	if err == nil && info.Mode().IsRegular() {
+		return nil
+	}
+	return fmt.Errorf("%s is not installed in this checkout: run bun install --frozen-lockfile, or bun install --frozen-lockfile --ignore-scripts in a worktree (CONTRIBUTING.md#setup)", tool)
 }
 
 // actionlintFindings runs actionlint over every workflow file tracked, named
@@ -311,30 +319,36 @@ func shellFindings(root string, workflows []string) ([]string, error) {
 }
 
 // workflowShells lists every shell: value in one decoded workflow: under
-// defaults.run at the top and in each job, and on each job's steps.
+// defaults.run at the top and in each job, and on each job's steps. A job id
+// and a value come from the workflow's text, so each is escaped for the
+// finding, and no control character reaches the terminal.
 func workflowShells(document any) []shellSetting {
 	var settings []shellSetting
 	add := func(where string, node any) {
 		if value, ok := lookup(node, "shell"); ok {
-			text, isString := value.(string)
-			shown := fmt.Sprint(value)
-			if isString {
-				shown = strconv.Quote(text)
-			}
-			settings = append(settings, shellSetting{where: where, value: text, text: shown})
+			text, _ := value.(string)
+			settings = append(settings, shellSetting{where: where, value: text, text: strconv.Quote(fmt.Sprint(value))})
 		}
 	}
 	add("defaults.run.shell", mappingValue(mappingValue(document, "defaults"), "run"))
 	jobs := mappingValue(document, "jobs")
 	for _, id := range mappingKeys(jobs) {
 		job := mappingValue(jobs, id)
-		add("jobs."+id+".defaults.run.shell", mappingValue(mappingValue(job, "defaults"), "run"))
+		shown := escaped(id)
+		add("jobs."+shown+".defaults.run.shell", mappingValue(mappingValue(job, "defaults"), "run"))
 		steps, _ := mappingValue(job, "steps").([]any)
 		for i, step := range steps {
-			add(fmt.Sprintf("jobs.%s.steps[%d].shell", id, i), step)
+			add(fmt.Sprintf("jobs.%s.steps[%d].shell", shown, i), step)
 		}
 	}
 	return settings
+}
+
+// escaped is s with every control character, quote and backslash escaped as a
+// Go string literal writes it, less the quotes around it.
+func escaped(s string) string {
+	quoted := strconv.Quote(s)
+	return quoted[1 : len(quoted)-1]
 }
 
 // lookup returns the value under key in node, matched in any case, and

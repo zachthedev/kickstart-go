@@ -27,7 +27,7 @@ func TestSearchFindings(t *testing.T) {
 		{name: "a second lefthook main config", tracked: []string{".lefthook.jsonc"}, wantIn: "is a lefthook config"},
 		{name: "a lowercase Taskfile", tracked: []string{"taskfile.yml"}, wantIn: `"taskfile.yml" is a Task config`},
 		{name: "a .taskrc", tracked: []string{".taskrc.yml"}, wantIn: `".taskrc.yml" is a Task config`},
-		{name: "a nested go.mod", tracked: []string{"internal/extra/go.mod"}, wantIn: `"internal/extra/go.mod" is a Go module file below the root, and every ./... row skips the module it starts`},
+		{name: "a nested go.mod, which review holds", tracked: []string{"internal/extra/go.mod", "_tools/go.mod"}},
 		{name: "a go.work", tracked: []string{"go.work"}, wantIn: `"go.work" is a Go workspace file`},
 		{name: "a go.work.sum below the root", tracked: []string{"tools/go.work.sum"}, wantIn: "is a Go workspace file"},
 		{name: "a tsconfig", tracked: []string{"tsconfig.json"}, wantIn: `"tsconfig.json" is a TypeScript or JavaScript project config, and Bun applies`},
@@ -68,8 +68,8 @@ func TestSearchFindings(t *testing.T) {
 // Each case plants files in the work tree, some of them tracked, and the
 // check must refuse a config on disk whether or not it is committed, where the
 // program that reads it looks: never a personal override untracked, nothing
-// under node_modules or a worktree, a go.mod only where ./... reaches, and a
-// tsconfig or a go.work at the root alone. A tracked file is refused once.
+// under node_modules or a worktree, and a tsconfig or a go.work at the root
+// alone. A tracked file is refused once.
 func TestSearchFindings_OnDisk(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -79,7 +79,7 @@ func TestSearchFindings_OnDisk(t *testing.T) {
 	}{
 		{name: "an untracked actionlint config", disk: []string{".github/actionlint.yaml"}, want: []string{"is an actionlint config"}},
 		{name: "an untracked second Taskfile", disk: []string{"Taskfile.yaml"}, want: []string{`"Taskfile.yaml" is a Task config`}},
-		{name: "an untracked go.mod where ./... reaches", disk: []string{"internal/extra/go.mod"}, want: []string{"is a Go module file below the root"}},
+		{name: "an untracked go.mod below the root, which review holds once committed", disk: []string{"internal/extra/go.mod"}},
 		{name: "an untracked go.work at the root", disk: []string{"go.work"}, want: []string{`"go.work" is a Go workspace file`}},
 		{name: "an untracked tsconfig at the root, in capitals", disk: []string{"TSConfig.json"}, want: []string{"is a TypeScript or JavaScript project config"}},
 		{name: "a tracked config is refused once", disk: []string{"taskfile.yml"}, tracked: []string{"taskfile.yml"}, want: []string{`"taskfile.yml" is a Task config`}},
@@ -94,9 +94,7 @@ func TestSearchFindings_OnDisk(t *testing.T) {
 				".Claude/WorkTrees/other/Taskfile.yaml",
 			},
 		},
-		{name: "a go.mod ./... never reaches", disk: []string{"_scratch/go.mod", "internal/testdata/mod/go.mod", ".hidden/go.mod"}},
 		{name: "a tsconfig and a go.work below the root", disk: []string{"docs/tsconfig.json", "tools/go.work", "tools/go.work.sum"}},
-		{name: "a go.mod inside a version control directory", disk: []string{".git/go.mod", "docs/.hg/go.mod"}},
 		{name: "every file the gate names, on disk", disk: []string{".prettierrc", ".golangci.yml", ".taplo.toml", ".github/zizmor.yml", "commitlint.config.js", "lefthook.yml", "Taskfile.yml", "go.mod"}},
 	}
 	for _, tt := range tests {

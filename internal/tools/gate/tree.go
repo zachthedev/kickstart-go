@@ -13,7 +13,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"unicode"
 
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
@@ -78,7 +77,7 @@ var rootRefused = []struct {
 }{
 	{name: ".config", reads: "mise, the dotnet tool manifest, cosmiconfig's meta config and lefthook all read configs from it"},
 	{name: vendor, reads: "go builds from it in place of the module cache unless a -mod flag says otherwise, and CI's gate sets -mod=readonly, so a local gate would check other code"},
-	{name: "'", reads: "actionlint 1.7.12 looks the whole -shellcheck value up as one program path before it splits it into words, and the gate's value opens with a quote, so on Linux and macOS a program under it would run in place of ShellCheck's stand-in"},
+	{name: "package.yaml", reads: "cosmiconfig reads a " + metaConfigKey + " key in it as commitlint's meta config whatever config commitlint names, and an $import there runs a module"},
 }
 
 // ///////////////////////////////////////////////
@@ -88,10 +87,11 @@ var rootRefused = []struct {
 // treeFindings refuses what the checkout can carry past mise.toml and
 // mise.lock: another mise config or lock file, a link where mise looks for
 // one, an entry the root may not hold (rootFindings), a tracked file a
-// program the gate starts reads before any check (startupFindings), a config
-// the gate names no program to read, tracked or on disk (searchFindings), a
-// go.mod directive that reaches the gate's own build or narrows ./...
-// (goModFindings), and a tracked file a row would skip (walkedFindings).
+// program reads before any check that the shared commits job leaves to the
+// gate (startupFindings), a config the gate names no program to read,
+// tracked or on disk (searchFindings), a go.mod directive that reaches the
+// gate's own build or narrows ./... (goModFindings), and a workflow the
+// workflows rows would skip or an inline zizmor waiver (walkedFindings).
 func treeFindings(dir string, tracked trackedLister) ([]string, error) {
 	found, err := configFindings(dir)
 	if err != nil {
@@ -317,36 +317,13 @@ func gitEnvironment(folders map[string]string) []string {
 	return env
 }
 
-// fold keys a name for comparison with a name a tool reads: every default
-// ignorable code point removed, then the whole name mapped to upper case and
-// back to lower case under Unicode's full mappings. NTFS and APFS open a name
-// in any case, and HFS+ drops ignorable code points, so two names this maps
-// to one key can open one file. The mapping takes the long s, the dotless i
-// and the Kelvin sign to s, i and k, and ß to ss, which merges more than a
-// filesystem does: every name the gate refuses is ASCII, so the cost is a
-// false refusal at worst. The Rust and Bun gates key names the same way.
+// fold keys a name for comparison with a name a tool reads: the whole name
+// mapped to upper case and back to lower case under Unicode's full mappings.
+// NTFS and APFS open a name in any case, so two names this maps to one key can
+// open one file. The mapping takes the long s, the dotless i and the Kelvin
+// sign to s, i and k, and ß to ss, which merges more than a filesystem does:
+// every name the gate refuses is ASCII, so the cost is a false refusal at
+// worst. The Rust and Bun gates key names the same way.
 func fold(name string) string {
-	kept := strings.Map(func(r rune) rune {
-		if defaultIgnorable(r) {
-			return -1
-		}
-		return r
-	}, name)
-	return cases.Lower(language.Und).String(cases.Upper(language.Und).String(kept))
-}
-
-// defaultIgnorable reports whether r has Unicode's Default_Ignorable_Code_Point
-// property, derived from the property tables the unicode package carries the
-// way DerivedCoreProperties.txt derives it: Other_Default_Ignorable_Code_Point,
-// format characters and variation selectors, less white space, the
-// interlinear annotation and Egyptian hieroglyph format characters, and the
-// prepended concatenation marks.
-func defaultIgnorable(r rune) bool {
-	switch {
-	case unicode.Is(unicode.White_Space, r), unicode.Is(unicode.Prepended_Concatenation_Mark, r):
-		return false
-	case r >= 0xFFF9 && r <= 0xFFFB, r >= 0x13430 && r <= 0x13440:
-		return false
-	}
-	return unicode.Is(unicode.Other_Default_Ignorable_Code_Point, r) || unicode.Is(unicode.Cf, r) || unicode.Is(unicode.Variation_Selector, r)
+	return cases.Lower(language.Und).String(cases.Upper(language.Und).String(name))
 }

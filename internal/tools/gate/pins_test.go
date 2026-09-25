@@ -200,6 +200,14 @@ func TestPinsFindings_Tampered(t *testing.T) {
 		{name: "a tool entry with an install hook", pins: replaceLock(`taplo = "0.10.0"`, `taplo = { version = "0.10.0", postinstall = "echo hooked" }`), wantIn: `[tools] taplo carries "postinstall"`},
 		{name: "a tool entry with another prefix", pins: replaceLock(`zizmor = "1.30.1"`, `zizmor = { version = "1.30.1", version_prefix = "release-" }`), wantIn: `[tools] zizmor version_prefix is "release-"`},
 		{name: "a tool entry that is neither", pins: replaceLock(`taplo = "0.10.0"`, `taplo = 10`), wantIn: `[tools] taplo is "10"`},
+		{
+			name: "a tool entry as an array of tables, which mise reads with its install hook",
+			pins: func(s string) string {
+				return strings.Replace(s, "taplo = \"0.10.0\"\n", "", 1) +
+					"\n[[tools.taplo]]\nversion = \"0.10.0\"\npostinstall = \"echo hooked\"\n"
+			},
+			wantIn: `[tools] taplo is "[map[postinstall:echo hooked version:0.10.0]]", and it must be a version or a table holding one`,
+		},
 
 		// mise.lock keys, allow-listed at every level, and the format it is
 		// written in.

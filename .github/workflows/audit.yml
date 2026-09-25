@@ -1,10 +1,19 @@
 name: audit
 
-# The scheduled report, on one daily clock. Go's whole-tree advisory reader is govulncheck, and it runs in
-# the gate on every push and pull request, so this file carries one job alone: the reusable workflows
-# workflow, whose zizmor runs online and asks GitHub about every pinned action. A pull request runs the
-# same audits, and this run repeats them daily, so a pinned commit that leaves its action's repository
-# or a ref that moves is reported with no pull request open. A red run is a report, never a check.
+# The scheduled report, on one daily clock. A red run is a report, never a check: it means work to
+# pick up. Go's whole-tree advisory reader is govulncheck, and it runs in the gate on every push and
+# pull request, so this file carries the two readers no pull request runs on a clock.
+#
+# The package.json audit script runs bun audit, which reads every package in bun.lock, transitives
+# included, against the live database and exits non-zero at or above the script's audit level.
+# bun.lock holds the tooling commitlint and Prettier run on, which ships in nothing, and no bot opens
+# a pull request for a transitive advisory there. The work is a direct bump through Renovate's next
+# security fix or a transitive one by hand with bun audit fix.
+#
+# The workflows job runs zizmor's online audits over the pinned actions: a pinned commit outside its
+# action's repository, a stale action ref, a known-vulnerable action. A pull request runs the same
+# audits, and this run repeats them daily, so a pinned commit that leaves its action's repository or
+# a ref that moves is reported with no pull request open.
 on:
   schedule:
     # At least once a day. The hour is clear of deps.yml's cron.
@@ -14,6 +23,27 @@ on:
 permissions: {}
 
 jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # bun audit reads bun.lock, so the job needs Bun and no install.
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+      # The verdict is a claim about an external database, and a clean verdict names no
+      # endpoint. bun audit has no --registry flag, and this variable outranks bunfig.toml and
+      # a dotenv, so setting it here fixes the endpoint for the run. The script, not bare bun audit,
+      # so its --audit-level and every --ignore waiver it carries apply to the daily report too.
+      - run: bun run audit
+        env:
+          BUN_CONFIG_REGISTRY: https://registry.npmjs.org/
+
   # The called job gets at most what is granted here: a checkout and the read-only audits.
   workflows:
     permissions:

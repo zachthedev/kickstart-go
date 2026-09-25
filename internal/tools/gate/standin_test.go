@@ -24,11 +24,16 @@ type failingReader struct{}
 // asks, it names every file after -- clean. Behind the stand-in, it writes the
 // script it read on stdin back to stdout, its arguments and whether
 // SHELLCHECK_OPTS reached it to stderr, and exits with the code an
-// "exit=<n>" argument names.
+// "exit=<n>" argument names. A "noread" argument makes it print a clean report
+// and exit 0 without reading its input.
 func fakeShellCheck(stdin io.Reader, stdout, stderr io.Writer, args []string) int {
 	if slices.Contains(args, "--format=checkstyle") {
 		_, files, _ := cutArgs(args, "--")
 		_, _ = stdout.Write(checkstyleFor(files, false))
+		return 0
+	}
+	if slices.Contains(args, "noread") {
+		fmt.Fprint(stdout, "[]")
 		return 0
 	}
 	script, _ := io.ReadAll(stdin)
@@ -75,6 +80,20 @@ func TestStandIn(t *testing.T) {
 			wantCode:   1,
 			wantStdout: "echo $X\n",
 			wantStderr: "args=exit=1 - opts=false",
+		},
+		{
+			name:       "ShellCheck that fails has its stdout held back, and its exit reported as such",
+			args:       []string{shellcheck, "exit=2", "-"},
+			stdin:      strings.NewReader("echo hi\n"),
+			wantCode:   2,
+			wantStderr: "exited 2, so its output is held back",
+		},
+		{
+			name:       "ShellCheck that stops reading a script longer than the pipe holds fails closed, with nothing on stdout",
+			args:       []string{shellcheck, "noread", "-"},
+			stdin:      strings.NewReader(strings.Repeat("echo hi\n", 1<<17)),
+			wantCode:   2,
+			wantStderr: "ShellCheck did not read the whole script",
 		},
 		{
 			name:       "ShellCheck that cannot start fails closed, with nothing on stdout",

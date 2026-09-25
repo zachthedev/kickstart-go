@@ -74,6 +74,14 @@ func TestCanaryFindings(t *testing.T) {
 			},
 		},
 		{
+			name: "actionlint that fails on a canary, reported as its exit and not as a guess about ShellCheck",
+			answers: map[string]output{
+				"canary.yml":    {stderr: []byte("panic: planted\n"), code: 3},
+				"directive.yml": refusalAnswer,
+			},
+			wantIn: []string{"actionlint exited 3 over canary.yml, so the canary proves nothing. actionlint printed: panic: planted"},
+		},
+		{
 			name: "findings on stderr alone, which is not where actionlint prints them",
 			answers: map[string]output{
 				"canary.yml":    {stderr: sc2086Answer.stdout, code: 1},

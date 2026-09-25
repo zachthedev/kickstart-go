@@ -5,17 +5,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"slices"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-// listPackages keys fakeGoRunner's answer to go list ./...; every other key is
-// a build's label, which keys its answer to go list -deps.
-const listPackages = "list ./..."
 
 // twoPairs is the coverage most cases read: the release pair CI never hosts,
 // and a host pair.
@@ -25,26 +19,15 @@ var twoPairs = lintCoverage{
 	release:   []platform{{goos: "linux", goarch: "arm64"}},
 }
 
-// fakeGoRunner plays go: it checks each run inherits what the package rows
-// inherit, with GOOS and GOARCH added for a build's sweep, and answers go list
-// ./... and each build's go list -deps with the outputs answers keys.
-func fakeGoRunner(t *testing.T, answers map[string]output) commandRunner {
+// fakeGoRunner plays go: it checks the run inherits what the package rows
+// inherit and asks for go list ./... alone, and answers with out.
+func fakeGoRunner(t *testing.T, out output) commandRunner {
 	t.Helper()
 	return func(name string, env []string, args ...string) (output, error) {
 		assert.Equal(t, "go-path", name)
-		require.Equal(t, "list", args[0])
-		if !slices.Contains(args, "-deps") {
-			assert.Empty(t, env, "go inherits what the package rows inherit")
-			assert.Equal(t, []string{"list", "./..."}, args)
-			return answers[listPackages], nil
-		}
-		require.Len(t, env, 2)
-		goos, _ := strings.CutPrefix(env[0], "GOOS=")
-		goarch, _ := strings.CutPrefix(env[1], "GOARCH=")
-		tags, ok := strings.CutPrefix(args[3], "-tags=")
-		require.True(t, ok, "the sweep names its tag set: %q", args)
-		assert.Equal(t, []string{"list", "-deps", "-test", args[3], "-f", "{{if and .Module .Module.Main .DepOnly (not .ForTest)}}{{.ImportPath}}{{end}}", "./..."}, args)
-		return answers[buildLabel(platform{goos: goos, goarch: goarch}, tags)], nil
+		assert.Empty(t, env, "go inherits what the package rows inherit")
+		assert.Equal(t, []string{"list", "./..."}, args)
+		return out, nil
 	}
 }
 
@@ -52,60 +35,37 @@ func TestPackagesFindings(t *testing.T) {
 	three := output{stdout: []byte("example.com/a\nexample.com/b\r\nexample.com/c\n")}
 	tests := []struct {
 		name         string
-		answers      map[string]output
+		out          output
 		wantSummary  string
 		wantFindings []string
 		wantRelay    string
 	}{
 		{
 			name:        "packages",
-			answers:     map[string]output{listPackages: three},
+			out:         three,
 			wantSummary: "go list ./... matched 3 packages, and the rows read linux/arm64 windows/amd64, each with no build tags",
 		},
 		{
 			name:        "one package",
-			answers:     map[string]output{listPackages: {stdout: []byte("example.com/a\n")}},
+			out:         output{stdout: []byte("example.com/a\n")},
 			wantSummary: "go list ./... matched 1 package,",
 		},
 		{
 			name:         "no package",
-			answers:      map[string]output{listPackages: {stderr: []byte(`go: warning: "./..." matched no packages` + "\n")}},
+			out:          output{stderr: []byte(`go: warning: "./..." matched no packages` + "\n")},
 			wantSummary:  "matched 0 packages",
 			wantFindings: []string{"go list ./... matched no package, so vet, lint, deadcode, testpair and build check nothing"},
 			wantRelay:    "matched no packages",
 		},
 		{
 			name:         "a load error",
-			answers:      map[string]output{listPackages: {stdout: []byte("example.com/a\n"), stderr: []byte("go: cannot load\n"), code: 1}},
+			out:          output{stdout: []byte("example.com/a\n"), stderr: []byte("go: cannot load\n"), code: 1},
 			wantFindings: []string{"go list exited 1"}, wantRelay: "cannot load",
-		},
-		{
-			name: "a package one build alone reaches",
-			answers: map[string]output{listPackages: three, "linux/arm64": {stdout: []byte(
-				"example.com/internal/_hidden\n\nexample.com/internal/testdata/fixture\n")}},
-			wantFindings: []string{
-				"example.com/internal/_hidden is a package of this module that the build or a test reaches for linux/arm64, and go list ./... does not match it",
-				"example.com/internal/testdata/fixture is a package of this module that the build or a test reaches for linux/arm64,",
-			},
-		},
-		{
-			name: "a package every build reaches, named once",
-			answers: map[string]output{
-				listPackages:    three,
-				"linux/arm64":   {stdout: []byte("example.com/_tools\n")},
-				"windows/amd64": {stdout: []byte("example.com/_tools\n")},
-			},
-			wantFindings: []string{"example.com/_tools is a package of this module that the build or a test reaches for linux/arm64, windows/amd64,"},
-		},
-		{
-			name:         "a build's sweep that fails",
-			answers:      map[string]output{listPackages: three, "windows/amd64": {stderr: []byte("go: cannot find\n"), code: 1}},
-			wantFindings: []string{"go list -deps for windows/amd64 exited 1"}, wantRelay: "cannot find",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := packagesFindings(fakeGoRunner(t, tt.answers), "go-path", t.TempDir(), nil, twoPairs, nil)
+			result, err := packagesFindings(fakeGoRunner(t, tt.out), "go-path", t.TempDir(), nil, twoPairs, nil)
 			require.NoError(t, err)
 			require.Len(t, result.findings, len(tt.wantFindings), "findings: %q", result.findings)
 			for i, want := range tt.wantFindings {
@@ -115,29 +75,17 @@ func TestPackagesFindings(t *testing.T) {
 			assert.Contains(t, string(result.relay), tt.wantRelay)
 		})
 	}
-	t.Run("each tag set is swept on each pair", func(t *testing.T) {
+	t.Run("the summary names each tag set", func(t *testing.T) {
 		cover := twoPairs
 		cover.tagSets = []string{"", "dev"}
-		answers := map[string]output{listPackages: three, "windows/amd64 with -tags dev": {stdout: []byte("example.com/_devonly\n")}}
-		result, err := packagesFindings(fakeGoRunner(t, answers), "go-path", t.TempDir(), nil, cover, nil)
+		result, err := packagesFindings(fakeGoRunner(t, three), "go-path", t.TempDir(), nil, cover, nil)
 		require.NoError(t, err)
-		require.Len(t, result.findings, 1)
-		assert.Contains(t, result.findings[0], "reaches for windows/amd64 with -tags dev,")
+		assert.Empty(t, result.findings)
 		assert.Contains(t, result.summary, "each with no build tags and with -tags dev")
 	})
 	t.Run("go that cannot start", func(t *testing.T) {
 		failing := func(string, []string, ...string) (output, error) { return output{}, os.ErrNotExist }
 		_, err := packagesFindings(failing, "go-path", t.TempDir(), nil, twoPairs, nil)
-		assert.ErrorContains(t, err, "running go-path")
-	})
-	t.Run("go that starts for the count and not for the sweep", func(t *testing.T) {
-		run := func(_ string, _ []string, args ...string) (output, error) {
-			if slices.Contains(args, "-deps") {
-				return output{}, os.ErrNotExist
-			}
-			return three, nil
-		}
-		_, err := packagesFindings(run, "go-path", t.TempDir(), nil, twoPairs, nil)
 		assert.ErrorContains(t, err, "running go-path")
 	})
 	t.Run("the file checks join the row", func(t *testing.T) {
@@ -155,13 +103,12 @@ func TestPackagesFindings(t *testing.T) {
 		}
 		cover := lintCoverage{platforms: []platform{{goos: "windows", goarch: "amd64"}}, tagSets: []string{""}}
 		tracked := []string{"rt.go", "internal/_old/old.go", "internal/w/w.go", "internal/w/w_linux.go"}
-		result, err := packagesFindings(fakeGoRunner(t, map[string]output{listPackages: three}), "go-path", root, tracked, cover, nil)
+		result, err := packagesFindings(fakeGoRunner(t, three), "go-path", root, tracked, cover, nil)
 		require.NoError(t, err)
-		require.Len(t, result.findings, 4, "findings: %q", result.findings)
-		assert.Contains(t, result.findings[0], `"internal/_old/old.go" sits under "_old"`)
-		assert.Contains(t, result.findings[1], `"internal/w/w_linux.go" compiles in no build the lint and vet rows read`)
-		assert.Contains(t, result.findings[2], `"rt.go" carries "do not edit"`)
-		assert.Contains(t, result.findings[3], `internal/w/w.go:3 carries "//nolint:all // why"`)
+		require.Len(t, result.findings, 3, "findings: %q", result.findings)
+		assert.Contains(t, result.findings[0], `"internal/w/w_linux.go" compiles in no build the lint and vet rows read`)
+		assert.Contains(t, result.findings[1], `"rt.go" carries "do not edit"`)
+		assert.Contains(t, result.findings[2], `internal/w/w.go:3 carries "//nolint:all // why"`)
 	})
 }
 
@@ -239,8 +186,8 @@ func TestCoverageFindings(t *testing.T) {
 		{name: "ignore", file: "internal/a/gen.go", content: "//go:build ignore\n\npackage main\n", cover: withDev, wantIn: "compiles in no build"},
 		{name: "cgo, on for a native pair", file: "internal/a/c.go", content: "//go:build cgo\n\npackage a\n", cover: hosts},
 		{name: "a file go never builds for its name", file: "internal/a/_draft.go", content: "package a\n", cover: hosts, wantIn: "compiles in no build"},
-		{name: "a directory starting with _", file: "internal/_hidden/h.go", content: "package hidden\n", cover: hosts, wantIn: `"internal/_hidden/h.go" sits under "_hidden", a directory ./... never matches`},
-		{name: "a top directory starting with _", file: "_tools/t.go", content: "package tools\n", cover: hosts, wantIn: `sits under "_tools"`},
+		{name: "a directory starting with _, which review holds", file: "internal/_hidden/h.go", content: "package hidden\n", cover: hosts},
+		{name: "a directory starting with _ holding a file no build compiles", file: "_tools/t.go", content: "//go:build freebsd\n\npackage tools\n", cover: hosts, wantIn: `"_tools/t.go" compiles in no build`},
 		{name: "a fixture under testdata", file: "internal/a/testdata/f.go", content: "//go:build ignore\n\npackage f\n", cover: hosts},
 		{name: "an extension go never reads", file: "internal/a/A.GO", content: "//go:build freebsd\n\npackage a\n", cover: hosts},
 		{name: "a file that is not Go", file: "docs/a.md", content: "//go:build freebsd\n", cover: hosts},
@@ -292,7 +239,7 @@ func TestLaxMarkerFindings(t *testing.T) {
 		generated []string
 		wantIn    string
 	}{
-		{name: "prose above the package clause", file: "internal/rt/rt.go", content: "// The table here mirrors docs/dev.md. Do not edit one without the other.\npackage rt\n", wantIn: `"internal/rt/rt.go" carries "do not edit"`},
+		{name: "prose above the package clause", file: "internal/rt/rt.go", content: "// The table here mirrors README.md. Do not edit one without the other.\npackage rt\n", wantIn: `"internal/rt/rt.go" carries "do not edit"`},
 		{name: "a doc comment after the package clause", file: "internal/rt/rt.go", content: "package rt\n\n// Header is the canonical \"DO NOT EDIT\" marker.\nconst Header = \"x\"\n", wantIn: `carries "do not edit"`},
 		{name: "code generated in a block comment", file: "rt.go", content: "/*\n Code Generated here\n*/\npackage rt\n", wantIn: `carries "code generated"`},
 		{name: "an autogenerated file note", file: "rt.go", content: "// This is an AutoGenerated File.\npackage rt\n", wantIn: `carries "autogenerated file"`},
@@ -329,12 +276,8 @@ func TestLaxMarkerFindings(t *testing.T) {
 	})
 }
 
-// fakeGoProgram answers go list ./... with two packages, and a go list -deps
-// sweep with none of this module's packages left out.
-func fakeGoProgram(stdout io.Writer, args []string) int {
-	if slices.Contains(args, "-deps") {
-		return 0
-	}
+// fakeGoProgram answers go list ./... with two packages.
+func fakeGoProgram(stdout io.Writer) int {
 	fmt.Fprintln(stdout, "example.com/fake/a")
 	fmt.Fprintln(stdout, "example.com/fake/b")
 	return 0

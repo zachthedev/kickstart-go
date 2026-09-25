@@ -48,9 +48,9 @@ func TestMain(m *testing.M) {
 	case strings.HasPrefix(base, "gh"):
 		os.Exit(fakeGhProgram(os.Stdout, os.Stderr))
 	case strings.HasPrefix(base, "go"):
-		os.Exit(fakeGoProgram(os.Stdout, os.Args[1:]))
+		os.Exit(fakeGoProgram(os.Stdout))
 	case strings.HasPrefix(base, "zizmor"):
-		os.Exit(fakeZizmorProgram(os.Stdout, os.Stderr, os.Args[1:]))
+		os.Exit(fakeZizmorProgram(os.Stderr))
 	}
 	os.Exit(m.Run())
 }
