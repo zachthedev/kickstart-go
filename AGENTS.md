@@ -6,8 +6,13 @@
 
 ## Read first
 
-Read [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/dev.md](docs/dev.md) before changing anything. They bind an
-agent as they bind a person.
+Read these before changing anything, in order. They bind an agent as they bind a person.
+
+1. [README.md](README.md)
+2. [CONTRIBUTING.md](CONTRIBUTING.md), whole
+3. [SECURITY.md](SECURITY.md)
+4. [docs/install.md](docs/install.md)
+5. [docs/usage.md](docs/usage.md)
 
 ## Verify
 
@@ -30,9 +35,10 @@ repository, each with its reason. Keep the ones below that still apply. -->
   Each rewrites its allow file wholesale: the category tags come out, the header is replaced, and a note a
   person left there is gone with no diff a reviewer reads as a deletion.
 - Never run `bun add` or `bun install` with `--minimum-release-age` below the value in `bunfig.toml`, and
-  never pass `--ignore-scripts` to work around a blocked install script. The cooldown is the window in which
-  a malicious release is pulled, and a version installed under a lowered one lands in `bun.lock` for every
-  later install, where no cooldown reads it again.
+  never pass `--ignore-scripts` to work around a blocked install script in your own install. Installing an
+  unread pull request branch passes `--ignore-scripts` on purpose ([Safety](CONTRIBUTING.md#safety)). The
+  cooldown is the window in which a malicious release is pulled, and a version installed under a lowered one
+  lands in `bun.lock` for every later install, where no cooldown reads it again.
 - Never delete the marker machinery while the absorbed check in `MARKERS.md` exits non-zero. A directive
   still in the tree is work a person has not done yet, and the inventory is the one list of it.
 - Never hand-edit `CHANGELOG.md` or `.release-please-manifest.json`, except the one template reset
@@ -43,7 +49,7 @@ repository, each with its reason. Keep the ones below that still apply. -->
 
 ## Deviations
 
-A comment beside a line that names the handbook records a deliberate deviation. It is a decision, not a defect.
+A comment beside a deviating line records a deliberate deviation. It is a decision, not a defect.
 
 ## Where the rest is
 

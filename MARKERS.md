@@ -12,13 +12,12 @@ divergence from template content.
 | `.github/renovate.json` | 1 | 0 |
 | `.github/workflows/cd.yml` | 1 | 0 |
 | `AGENTS.md` | 3 | 0 |
-| `CONTRIBUTING.md` | 1 | 0 |
+| `CONTRIBUTING.md` | 5 | 0 |
 | `README.md` | 2 | 0 |
 | `SECURITY.md` | 2 | 0 |
 | `Taskfile.yml` | 2 | 0 |
 | `cmd/example/main.go` | 2 | 0 |
 | `cmd/generate/main.go` | 1 | 0 |
-| `docs/dev.md` | 4 | 0 |
 | `docs/install.md` | 4 | 0 |
 | `docs/usage.md` | 1 | 0 |
 | `go.mod` | 1 | 0 |

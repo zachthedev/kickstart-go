@@ -20,8 +20,8 @@ have slots.
 2. Find and replace `zach.tools/go/kickstart` with your module path. `git grep -l zach.tools/go/kickstart`
    lists every file.
 3. Work through every template marker. `MARKERS.md` lists them and the section below says how.
-4. Install and run the gate. [docs/dev.md](docs/dev.md) names what the machine needs and the first-run
-   commands.
+4. Install and run the gate. [CONTRIBUTING.md#setup](CONTRIBUTING.md#setup) names what the machine needs and
+   the first-run commands.
 5. Trim what you do not need (below) and record each deviation at its drift site.
 
 ## The gate
@@ -37,15 +37,14 @@ CI alone.
 
 ## Documentation
 
-| Document                           | Holds                                                                                                       |
-| ---------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | Setup, the gate, commit messages, where code goes, tests, code, dependencies, releases, what never happens. |
-| [docs/dev.md](docs/dev.md)         | Prerequisites, the first run, running it, generated files, tests that need a real thing, dev-only code.     |
-| [docs/install.md](docs/install.md) | Requirements, install, checking the download, upgrade, uninstall.                                           |
-| [docs/usage.md](docs/usage.md)     | What `--help` does not carry: files, exit status.                                                           |
-| [SECURITY.md](SECURITY.md)         | What counts as a vulnerability here, and how to report one privately.                                       |
-| [AGENTS.md](AGENTS.md)             | What an agent reads first, runs to verify, and never does in a session. `CLAUDE.md` imports it.             |
-| [MARKERS.md](MARKERS.md)           | Generated: every template marker left in the tree, and the command that proves the template is absorbed.    |
+| Document                           | Holds                                                                                                    |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Setting up, running, changing and releasing the repository, troubleshooting, and what never happens.     |
+| [docs/install.md](docs/install.md) | Requirements, install, checking the download, upgrade, uninstall.                                        |
+| [docs/usage.md](docs/usage.md)     | What `--help` does not carry: files, exit status.                                                        |
+| [SECURITY.md](SECURITY.md)         | What counts as a vulnerability here, and how to report one privately.                                    |
+| [AGENTS.md](AGENTS.md)             | What an agent reads first, runs to verify, and never does in a session. `CLAUDE.md` imports it.          |
+| [MARKERS.md](MARKERS.md)           | Generated: every template marker left in the tree, and the command that proves the template is absorbed. |
 
 ## Template markers
 
@@ -81,7 +80,7 @@ diverges from nothing. An outright removal explains itself in the deletion diff.
   `.env.template` is generated from it. Copy it to `.env`, which is gitignored, and uncomment what you need.
   `Taskfile.yml` loads that file, so a value there reaches every task.
 - Dev-only code, gated by build tag. `go tool task build TAGS=dev` compiles it in.
-  [docs/dev.md#dev-only-code](docs/dev.md#dev-only-code) has the file shape.
+  [CONTRIBUTING.md#dev-only-code](CONTRIBUTING.md#dev-only-code) has the file shape.
 - The workflows: `ci.yml` judges a pull request, `cd.yml` releases after a merge, `codeql.yml` scans, and
   `deps.yml` runs Renovate. Each calls the reusable workflows in
   [zachthedev/.github](https://github.com/zachthedev/.github).
