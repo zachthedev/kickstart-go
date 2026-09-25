@@ -1,0 +1,29 @@
+# Every path the format row skips. The row passes --ignore-path .prettierignore,
+# so .gitignore narrows nothing, and CODEOWNERS routes every change here to the
+# code owner's review. A leading slash anchors an entry to the root, so a file
+# of that name below it is still checked.
+
+# Written by release-please on every release. Its bullets are asterisks and its
+# version headers carry a blank line prettier would collapse, so formatting it
+# turns each release into a failing check on main. The manifest is written on
+# one line by the same tool.
+/CHANGELOG.md
+/.release-please-manifest.json
+# Written by cmd/generate, whose table is not column-aligned the way prettier
+# wants it. The generate task checks it by regenerating, not by formatting.
+/MARKERS.md
+
+# Local-only paths .gitignore names that can hold a file Prettier reads: build
+# and coverage output, editor settings, local notes, lefthook's per-user
+# overrides, and Claude Code's per-machine settings, reviews and worktrees.
+/dist/
+/coverage.*
+/.idea/
+/.vscode/
+/*.local.*
+/lefthook-local.*
+/.lefthook-local.*
+/.lefthook-local/
+.claude/settings.local.json
+.claude/review/
+.claude/worktrees/

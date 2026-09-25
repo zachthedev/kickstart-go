@@ -1,0 +1,7 @@
+# The gitignored files a new worktree is seeded with, in .gitignore syntax. A
+# file is copied when it both matches a pattern here and is ignored by
+# .gitignore. Each is a local record or a local install that a worktree needs
+# on day one and the repository never carries.
+node_modules/
+.env
+.claude/settings.local.json

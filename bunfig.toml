@@ -1,0 +1,8 @@
+# Bun waits three days before resolving a newly published version, the window
+# in which a malicious release is usually pulled. This file exists because
+# Renovate's weekly lock file maintenance runs `bun install` inside a container
+# that has no user-level config, and Renovate applies no cooldown to that update
+# type. Without it, a transitive dependency published minutes ago lands in
+# bun.lock there.
+[install]
+minimumReleaseAge = 259200 # 3 days

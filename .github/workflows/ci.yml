@@ -1,0 +1,114 @@
+name: ci
+
+# Everything that judges a pull request: the gate on three platforms, the commit messages, the
+# workflow linters and the advisory check. The three shared jobs call the reusable workflows in
+# zachthedev/.github, pinned by commit with the release's version beside the pin.
+on:
+  # Every pull request, whatever it targets. A stacked pull request is based on the layer
+  # below it, and a base filter would leave each middle layer with no checks.
+  pull_request:
+  push:
+    branches: [main]
+
+permissions: {}
+
+# The four mise pins, for the mise commands jdx/mise-action runs itself: mise.toml is the one config
+# file, with no .tool-versions, no environment layer and no per-platform layer. The gate's own mise
+# commands build their environment from an allow-list and set these again.
+env:
+  MISE_OVERRIDE_CONFIG_FILENAMES: mise.toml
+  MISE_OVERRIDE_TOOL_VERSIONS_FILENAMES: none
+  MISE_ENV: ''
+  MISE_AUTO_ENV: 'false'
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # The gate a contributor runs locally, called and never restated. `go tool task --list`
+  # prints every task with what it checks. Its tools task asserts mise.lock against mise.toml
+  # and then installs, in that order by construction, and the race leg runs for real on every
+  # runner image, because each ships a C compiler.
+  gate:
+    strategy:
+      # One platform failing still reports the others.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    # Every go command in the job reads go.mod alone, and builds from the module cache and what
+    # go.mod names. A tracked go.work could replace a dependency of the gate itself with checkout
+    # code, inside `gate pins` before it refuses the file, and a tracked vendor/ is what go builds
+    # from when no -mod flag is set. A replace in go.mod is the step below's to refuse.
+    env:
+      GOWORK: 'off'
+      GOFLAGS: -mod=readonly
+    steps:
+      # Before the checkout, because the action runs mise --version and mise ls in a workspace it
+      # trusts, and a pull request's mise.toml would render there before the gate refuses it.
+      # mise alone, verified against the release's signed checksums. install: false, because
+      # the gate asserts mise.lock before it installs from it, and an install here would put
+      # the bytes on disk before the assertions read the file. cache: false for the same
+      # reason: nothing restored ahead of the assertions. github_token is empty, because a
+      # locked install of these four registry-routed tools makes no GitHub API request, so the
+      # job token has no use in this job. env: false and export_path: false keep what a config
+      # file renders out of the later steps, and add_shims_to_path: false keeps the shims out of
+      # PATH, since the gate reaches each tool through the path `gate mise which` prints and
+      # nothing runs a tool by bare name.
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        with:
+          version: 2026.9.11
+          install: false
+          cache: false
+          github_token: ''
+          env: false
+          export_path: false
+          add_shims_to_path: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The toolchain go.mod names. The action verifies no download, so that pin plus the
+      # cooldown is the control.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      # A replace or godebug line in go.mod, or a //go:debug line in the gate's package, reaches the
+      # gate's own build below, so it is refused before that build, by a script that builds nothing.
+      - run: sh scripts/go-mod-check.sh
+      # The pins checks on their own, before anything reads a file they refuse. `go tool task`
+      # loads .env into every task before its first command, so a tracked copy could set GOFLAGS
+      # for the gate's own build. bun install keeps a tracked package under node_modules and
+      # fetches from the registry a tracked .npmrc names.
+      - run: go run ./internal/tools/gate pins
+      # packageManager in package.json is the one Bun pin, for commitlint and Prettier.
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+      # Neither Prettier nor commitlint needs an install script, so none runs.
+      - run: bun install --frozen-lockfile --ignore-scripts
+      # No token, so the gate's zizmor runs offline. Its online audits run in the workflows
+      # job below, the one job that holds the job token.
+      - run: go tool task check
+
+  # A called workflow's job gets at most what its caller grants here, so each job grants what
+  # the called job declares: a checkout and the read-only audits, nothing more.
+  commits:
+    permissions:
+      contents: read
+    uses: zachthedev/.github/.github/workflows/commits.yml@09a9a00aae657ea11e5d5979ef3ce5859d9aba3a # v0.2.0
+
+  workflows:
+    permissions:
+      contents: read
+    uses: zachthedev/.github/.github/workflows/workflows.yml@09a9a00aae657ea11e5d5979ef3ce5859d9aba3a # v0.2.0
+
+  # A waived advisory is passed as `with: allow-ghsas:` here, with a comment beside it naming the
+  # advisory, what it blocks, why shipping is safer and the condition that removes it.
+  dependency-review:
+    permissions:
+      contents: read
+    uses: zachthedev/.github/.github/workflows/dependency-review.yml@09a9a00aae657ea11e5d5979ef3ce5859d9aba3a # v0.2.0

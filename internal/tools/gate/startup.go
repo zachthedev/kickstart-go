@@ -1,0 +1,196 @@
+package main
+
+import (
+	"encoding/json"
+	"encoding/json/jsontext"
+	"errors"
+	"fmt"
+	"io/fs"
+	"maps"
+	"os"
+	"path"
+	"path/filepath"
+	"slices"
+	"strconv"
+	"strings"
+)
+
+// ///////////////////////////////////////////////
+// Constants
+// ///////////////////////////////////////////////
+
+const (
+	// autoloadedEnv is the file Taskfile.yml's dotenv loads into every task.
+	// Task sets each variable in it that the environment leaves unset, so a
+	// tracked copy reaches every command a task runs, go included. It is also
+	// the first of bunEnvFiles.
+	autoloadedEnv = ".env"
+	// npmrc names the registry bun install fetches from, read in the directory
+	// the install starts in.
+	npmrc = ".npmrc"
+	// nodeModules is where Bun runs Prettier and commitlint from, each by its
+	// path. bun install keeps a tracked package directory at the locked
+	// version, and Bun then runs it.
+	nodeModules = "node_modules"
+	// vendor is where go builds dependencies from when the directory exists and
+	// no -mod flag says otherwise.
+	vendor = "vendor"
+	// trackedShown is how many tracked paths under node_modules or vendor a
+	// finding names before it counts the rest.
+	trackedShown = 5
+	// bunfig is the file Bun reads its settings from, in the directory it starts
+	// in. A top-level or [test] preload runs a module before the program Bun
+	// starts, and [define] rewrites the code it runs, so the file holds the
+	// install cooldown alone. It is committed because Renovate's lock file
+	// maintenance runs bun install in a container with no user-level config.
+	bunfig = "bunfig.toml"
+	// excerptBytes is how much of a file's text a finding quotes.
+	excerptBytes = 200
+)
+
+// ///////////////////////////////////////////////
+// Variables
+// ///////////////////////////////////////////////
+
+// bunEnvFiles are the files Bun 1.4.2 loads into its environment at startup,
+// from the directory it starts in: the plain pair and each mode's pair.
+var bunEnvFiles = []string{
+	autoloadedEnv, ".env.local",
+	".env.development", ".env.development.local",
+	".env.production", ".env.production.local",
+	".env.test", ".env.test.local",
+}
+
+// ///////////////////////////////////////////////
+// The checks
+// ///////////////////////////////////////////////
+
+// startupFindings refuses what the programs the gate starts read from the
+// checkout before any check of their own. Among tracked, which names every
+// tracked path, it refuses Task's and Bun's env files, an .npmrc, anything
+// under node_modules, and patchedDependencies in any package.json, which
+// changes the code Bun installs. It refuses any bunfig.toml key
+// but [install] minimumReleaseAge. Names compare through fold, because a
+// case-insensitive filesystem opens a tracked .ENV as .env. A contributor's
+// own untracked file passes.
+func startupFindings(dir string, tracked []string) ([]string, error) {
+	var found, modules, vendored []string
+	isEnv := func(base string) bool {
+		return slices.ContainsFunc(bunEnvFiles, func(env string) bool { return base == fold(env) })
+	}
+	for _, name := range tracked {
+		key, base := fold(name), fold(path.Base(name))
+		switch {
+		case key == fold(autoloadedEnv):
+			found = append(found, fmt.Sprintf("%q is tracked, and Taskfile.yml loads it as %s into every task, where it can set GOFLAGS for every go command. Remove it from the index with git rm --cached",
+				name, autoloadedEnv))
+		case isEnv(base):
+			found = append(found, fmt.Sprintf("%q is tracked, and Bun loads a file of that name into its environment from the directory it starts in. Remove it from the index with git rm --cached", name))
+		case base == fold(npmrc):
+			found = append(found, fmt.Sprintf("%q is tracked, and bun install fetches from the registry an .npmrc names. Remove it from the index with git rm --cached", name))
+		case slices.Contains(strings.Split(key, "/"), fold(nodeModules)):
+			modules = append(modules, strconv.Quote(name))
+		case key == fold(vendor) || strings.HasPrefix(key, fold(vendor)+"/"):
+			vendored = append(vendored, strconv.Quote(name))
+		case base == fold("package.json"):
+			refused, err := packageFindings(dir, name)
+			if err != nil {
+				return nil, err
+			}
+			found = append(found, refused...)
+		}
+	}
+	if len(modules) > 0 {
+		found = append(found, trackedUnder(modules, nodeModules, "which bun install keeps and Bun runs"))
+	}
+	if len(vendored) > 0 {
+		found = append(found, trackedUnder(vendored, vendor, "which go builds from in place of the module cache unless a -mod flag says otherwise"))
+	}
+	whole, err := bunfigFindings(dir)
+	if err != nil {
+		return nil, err
+	}
+	return append(found, whole...), nil
+}
+
+// trackedUnder names the first few quoted paths under dir and counts the
+// rest, so a committed package reads as one finding. why says what reads dir.
+func trackedUnder(quoted []string, dir, why string) string {
+	shown := quoted[:min(len(quoted), trackedShown)]
+	more := ""
+	if extra := len(quoted) - len(shown); extra > 0 {
+		more = fmt.Sprintf(" and %d more", extra)
+	}
+	verb := "are"
+	if len(quoted) == 1 {
+		verb = "is"
+	}
+	return fmt.Sprintf("%s%s %s tracked under %s, %s. Remove them from the index with git rm -r --cached",
+		strings.Join(shown, ", "), more, verb, dir, why)
+}
+
+// packageFindings refuses patchedDependencies in the tracked package.json at
+// name, which bun install applies to the code of the packages it installs,
+// Prettier's and commitlint's included, and which nothing here needs at any
+// depth. A tracked file the work tree has deleted passes, because nothing can
+// read it.
+func packageFindings(dir, name string) ([]string, error) {
+	data, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(name)))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reading %s: %w", name, err)
+	}
+	// Bun keeps the first of a duplicated key and encoding/json the last, so a
+	// file carrying one reads differently to the two.
+	if !jsontext.Value(data).IsValid() {
+		return []string{fmt.Sprintf("%q is not valid JSON under RFC 7493, which refuses a duplicated key at any depth. Bun keeps the first copy of a key and Go the last, so nothing here can tell what Bun reads", name)}, nil
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return []string{fmt.Sprintf("%q is not a JSON object, so nothing here can tell what bun install reads from it: %s", name, strconv.Quote(err.Error()))}, nil
+	}
+	var found []string
+	if _, ok := fields["patchedDependencies"]; ok {
+		found = append(found, fmt.Sprintf("%q carries patchedDependencies, and bun install applies them to the code of the packages it installs, the ones the gate and the hooks run included. Remove the key", name))
+	}
+	return found, nil
+}
+
+// bunfigFindings refuses any bunfig.toml key but [install] minimumReleaseAge.
+// Bun reads the root bunfig.toml each time it starts, and a top-level preload,
+// a [test] preload or [define] runs or rewrites code before the program Bun
+// starts. A missing file passes.
+func bunfigFindings(dir string) ([]string, error) {
+	var raw map[string]any
+	err := decodeTOML(filepath.Join(dir, bunfig), &raw)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var found []string
+	for _, key := range slices.Sorted(maps.Keys(raw)) {
+		if key != "install" {
+			found = append(found, fmt.Sprintf("%s carries %q, and it holds [install] minimumReleaseAge alone. Bun acts on a preload or a define before the program it starts", bunfig, key))
+		}
+	}
+	install, _ := raw["install"].(map[string]any)
+	for _, key := range slices.Sorted(maps.Keys(install)) {
+		if key != "minimumReleaseAge" {
+			found = append(found, fmt.Sprintf("%s [install] carries %q, and it holds minimumReleaseAge alone", bunfig, key))
+		}
+	}
+	return found, nil
+}
+
+// excerpt quotes the start of a file's text for a finding, so a control
+// character cannot reach the terminal and a large file stays one line.
+func excerpt(data []byte) string {
+	if len(data) <= excerptBytes {
+		return strconv.Quote(string(data))
+	}
+	return strconv.Quote(string(data[:excerptBytes])) + "..."
+}

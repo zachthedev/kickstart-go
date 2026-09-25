@@ -1,0 +1,78 @@
+# Git hooks, installed once after cloning with `go tool lefthook install`.
+# lefthook is a go.mod tool directive, so the hook scripts resolve it through
+# `go tool` and nothing is fetched at commit time. commitlint is a package.json
+# pin, and bun runs its entry point by path under node_modules, so a clone with
+# no node_modules refuses every commit until `bun install` runs. bunx would
+# fall back to PATH, a node_modules/.bin above the checkout, or the latest
+# release in its cache, and hand a node shebang to whatever node PATH names.
+glob_matcher: doublestar
+
+commit-msg:
+  jobs:
+    # {1} is the message file git hands the hook. The type list comes from the
+    # Conventional Commits specification and the scopes from
+    # .github/commit-scopes.json, both by way of commitlint.config.js.
+    # --config names that file, which stops commitlint's search for any other.
+    # --no-env-file keeps Bun from loading an env file on disk into commitlint.
+    # The loop first unsets BUN_OPTIONS, BUN_INSPECT, BUN_INSPECT_CONNECT_TO
+    # and BUN_INSPECT_PRELOAD in every spelling, so no flag or preload from the
+    # shell reaches this Bun. An empty BUN_INSPECT_PRELOAD makes Bun exit 1, so
+    # the names are unset rather than emptied.
+    - name: commitlint
+      run: for name in $(env | cut -d= -f1 | grep -ixE 'bun_options|bun_inspect|bun_inspect_connect_to|bun_inspect_preload'); do unset "$name"; done; bun --no-env-file ./node_modules/@commitlint/cli/cli.js --config commitlint.config.js --edit {1}
+
+pre-commit:
+  jobs:
+    # generate runs first so downstream jobs see fresh output. The skip
+    # clause short-circuits when no staged file matches any registered
+    # input pattern, so pre-commit stays fast on unrelated changes.
+    - name: generate
+      skip:
+        - run: >-
+            regex=$(go run ./cmd/generate list input-regexp)
+            && [ -n "$regex" ]
+            && ! git diff --cached --name-only | grep -qE "$regex"
+      run: go tool task generate
+
+    - name: checks
+      group:
+        parallel: true
+        jobs:
+          - name: vet
+            glob: '**/*.go'
+            run: go vet ./...
+
+          # -diff prints what `go mod tidy` would change and exits 1, without
+          # writing, so the commit carries only what the author staged.
+          - name: tidy
+            glob: '{**/*.go,go.mod,go.sum}'
+            run: go mod tidy -diff
+
+pre-push:
+  # piped stops at the first failed job, so check never starts over a tree
+  # pins refused.
+  piped: true
+  jobs:
+    # A replace or godebug line in go.mod, or a //go:debug line in the gate's
+    # package, reaches the gate's own build, so it is refused first, by a
+    # script that builds nothing, as CI's gate job does.
+    - name: go-mod
+      run: sh scripts/go-mod-check.sh
+
+    # The pins checks on their own, before task loads .env into every task.
+    # Both jobs read go.mod alone, as CI's gate job does: a tracked go.work
+    # could replace a dependency of the gate itself, and go builds from a
+    # tracked vendor/ when no -mod flag is set.
+    - name: pins
+      env:
+        GOWORK: 'off'
+        GOFLAGS: -mod=readonly
+      run: go run ./internal/tools/gate pins
+
+    # The gate without its test rows, which CI runs on every push. It runs
+    # over the working tree, so uncommitted edits count toward the result.
+    - name: check
+      env:
+        GOWORK: 'off'
+        GOFLAGS: -mod=readonly
+      run: go tool task check:quick

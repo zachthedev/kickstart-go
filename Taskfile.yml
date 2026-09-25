@@ -1,0 +1,421 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+version: '3'
+
+# Commands run through task's own POSIX interpreter on every platform, so
+# nothing here may reach for a bashism, for cmd.exe or for PowerShell. A
+# command that needs more than one line stays a script under scripts/ and is
+# invoked as one.
+set: [errexit, pipefail]
+
+# Local build settings, loaded into the environment of every task. A missing
+# file is the ordinary case; `.env.template` documents what may go in here.
+# `gate pins` refuses a tracked copy, because every task would load it. This
+# line loads the file before any task's first command, so CI and the push
+# hook run `gate pins` on its own before they start task.
+dotenv: ['.env']
+
+# Every go command a task runs reads go.mod alone, never a go.work, which
+# would rebuild the gate and every row from a branch's workspace, and builds
+# from the module cache, never a vendor directory, which go reads by default
+# when one exists. These entries outrank a value .env sets, and a value the
+# shell exports outranks them, as Task skips an env entry the shell already
+# carries. `go tool task` itself builds before any of this applies, so CI's
+# gate job and the push hook set both for that build too, and the gate
+# refuses a go.work and a vendor directory on disk.
+env:
+  GOWORK: 'off'
+  GOFLAGS: '-mod=readonly'
+
+vars:
+  # Every variable below reads, in order: a value given on the command line
+  # (`go tool task build GOOS=linux`), then `.env`, then the environment,
+  # then the default written here. A variable with no default resolves to
+  # the empty string, which the Go toolchain reads as its own default. Every
+  # value reaches a command through shellQuote, so a value is one shell word
+  # whatever it carries; a list variable is split into words first with
+  # splitArgs.
+  GOOS: '{{.GOOS}}'
+  GOARCH: '{{.GOARCH}}'
+  CGO_ENABLED: '{{.CGO_ENABLED | default "0"}}'
+  CC: '{{.CC}}'
+
+  # A linter sees only the files the target build compiles, so one run
+  # exempts every platform-gated file from every rule. `lint` and `vet` run
+  # once per os/arch pair named here, which is what reaches a file selected by
+  # a _windows.go or _arm64.go suffix or a `//go:build` line: CI's three
+  # hosts and every pair RELEASE_TARGETS ships. The packages row sweeps the
+  # same pairs, refuses a release pair missing here, and refuses a tracked Go
+  # file no pair and tag set compiles.
+  LINT_PLATFORMS: '{{.LINT_PLATFORMS | default "linux/amd64 linux/arm64 darwin/arm64 windows/amd64"}}'
+
+  # Build tag sets `lint` and `vet` read on every pair, beside the build with
+  # no tags: one word each, with commas between the tags of a set, as -tags
+  # takes them. None by default, since no file here carries a custom tag. The
+  # first dev-only file adds dev here, or the packages row refuses it.
+  LINT_TAGS: '{{.LINT_TAGS}}'
+
+  # Packages every test task runs against. One definition, so `testquick`,
+  # `test` and `coverage` cannot cover different package sets.
+  TEST_TARGET: '{{.TEST_TARGET | default "./..."}}'
+
+  # go test's limit per test binary, passed as -timeout by every test task.
+  # 10m is go test's own default, written out so a package that runs longer
+  # under the race detector raises it here and nowhere else. CI's gate job
+  # stops at its own timeout-minutes, in ci.yml.
+  TEST_TIMEOUT: '{{.TEST_TIMEOUT | default "10m"}}'
+
+  # Build tags. Empty by default, so `task build` produces a production
+  # binary with no dev-only code compiled in. `task build TAGS=dev` adds it.
+  TAGS: '{{.TAGS}}'
+  GO_TAG_FLAGS: '{{if .TAGS}}-tags {{shellQuote .TAGS}}{{end}}'
+
+  # Extra arguments for the two gates that take a subcommand.
+  ARGS: '{{.ARGS}}'
+
+  # Build inputs. This file is the only place a default is written: every
+  # script under scripts/ refuses a value it was not given rather than
+  # substituting one, so a task and a bare script invocation cannot build
+  # different things. Override on the command line, e.g.
+  # `go tool task build VERSION=1.2.3`.
+  BUILD_TARGET: '{{.BUILD_TARGET | default "./cmd/..."}}'
+
+  # What `release` ships: the packages users run, built for every os/arch pair
+  # named, which cd.yml attaches to the release. cmd/generate is a development
+  # tool and stays out.
+  # TODO(kickstart): name your binary's package and the platforms you support.
+  RELEASE_PACKAGES: '{{.RELEASE_PACKAGES | default "./cmd/example"}}'
+  RELEASE_TARGETS: '{{.RELEASE_TARGETS | default "linux/amd64 linux/arm64 darwin/arm64 windows/amd64"}}'
+
+  # TODO(kickstart): update these two to your module's internal paths.
+  VERSION_PKG: '{{.VERSION_PKG | default "zach.tools/go/kickstart/internal/version"}}'
+  REMOTE_PKG: '{{.REMOTE_PKG | default "zach.tools/go/kickstart/internal/remote"}}'
+
+  # These three are discovered rather than defaulted. scripts/build.sh reads
+  # them from git when they arrive empty, which is logic rather than a value
+  # and so belongs with the script that needs it.
+  VERSION: '{{.VERSION}}'
+  REPO_OWNER: '{{.REPO_OWNER}}'
+  REPO_NAME: '{{.REPO_NAME}}'
+
+tasks:
+  # ///// Help /////
+
+  help:
+    desc: list every task with its description
+    silent: true
+    cmd: '{{shellQuote .TASK_EXE}} --list'
+
+  # ///// Tools /////
+
+  # One task asserts and then installs, so the assertions read mise.lock
+  # before anything is fetched from it. mise refuses a version the lockfile
+  # does not name and a platform it does not cover. The gate program holds
+  # the rest to internal/tools/gate/pins.go. Every mise command a task runs
+  # goes through `gate mise`, which runs the pins checks first and then starts
+  # mise under an environment it builds from an allow-list, so no task reaches
+  # mise over an unchecked file, and nothing this file, a .env or the shell
+  # sets reaches mise.
+  tools:
+    desc: assert mise.toml and mise.lock against internal/tools/gate, then install from the lockfile
+    cmds:
+      - go run ./internal/tools/gate pins
+      - go run ./internal/tools/gate mise install --locked
+
+  # ///// Canonical form /////
+
+  tidy:
+    desc: report whether go.mod/go.sum are canonical
+    silent: true
+    cmds:
+      - >-
+        go mod tidy -diff ||
+        { echo ""; echo "FAIL: go.mod/go.sum not tidy. Run 'go mod tidy' and commit."; exit 1; }
+
+  # A committed generated file is checked by regenerating it in the tree and
+  # diffing. git diff reads the worktree against the index, so a stale index
+  # fails on purpose, and an output git does not track passes git diff, so the
+  # third command refuses one. --error-unmatch reads the index, so an output
+  # that is untracked and also ignored is refused too.
+  generate:
+    desc: regenerate files produced by go:generate and fail when the tree differs
+    vars:
+      OUTPUTS:
+        sh: go run ./cmd/generate list outputs
+    cmds:
+      - go generate ./...
+      - git diff --exit-code -- {{range .OUTPUTS | splitLines}}{{shellQuote .}} {{end}}
+      - >-
+        if ! git ls-files --error-unmatch -- {{range .OUTPUTS | splitLines}}{{shellQuote .}} {{end}}>/dev/null;
+        then echo "FAIL: a generated file above is not tracked. Stage it."; exit 1; fi
+
+  # golangci-lint's formatters are the formatting check inside `lint`. This
+  # task rewrites the files the way that check wants them, under the config
+  # the lint row names.
+  fmt:
+    desc: apply golangci-lint's formatters (gofumpt and goimports)
+    cmd: go tool golangci-lint fmt --config .golangci.yml
+
+  # Prettier owns every file Go does not: YAML, JSON, Markdown. The gate runs
+  # its entry point by path under node_modules with the pinned Bun, so a
+  # checkout without the package fails rather than reaching whatever bunx
+  # would fall back to. It names .prettierrc
+  # and .prettierignore and turns .editorconfig off, so Prettier searches for
+  # no config of its own, and .gitignore narrows nothing. Prettier exits 0
+  # over a tree where it matched nothing, so the gate counts the files it
+  # names and fails on none. `gate pins` holds both files to their text.
+  format:
+    desc: prettier --check over the tree, counting the files it checked
+    cmd: go run ./internal/tools/gate format
+
+  # taplo owns TOML. The binary resolves through `mise which` from mise.lock
+  # like the workflow tools. The gate hands taplo every tracked TOML file by
+  # name with .taplo.toml named, and fails unless taplo's own list of the
+  # files it found matches, because taplo exits 0 having checked nothing.
+  toml:
+    desc: taplo fmt --check over every tracked TOML file, checked against taplo's own list
+    vars:
+      TAPLO:
+        sh: go run ./internal/tools/gate mise which taplo
+    cmd: go run ./internal/tools/gate toml {{shellQuote .TAPLO}}
+
+  # ///// Static analysis /////
+
+  # vet, lint, deadcode, testpair and build load packages the way go list
+  # does and print no count of their own, so this row prints the one count
+  # they share and fails on none. It also fails on a package of this module
+  # a build in LINT_PLATFORMS and LINT_TAGS reaches that ./... skips, on a Go
+  # file under a directory starting with _, on a Go file no such build
+  # compiles, on a release pair LINT_PLATFORMS leaves out, on a lax generated
+  # marker in any tracked Go file but the ones cmd/generate writes, which
+  # golangci-lint would skip whole, and on an inline waiver no linter checks.
+  packages:
+    desc: count the packages ./... matches and fail on none, on code no lint build reads, or on an unchecked waiver
+    vars:
+      OUTPUTS:
+        sh: go run ./cmd/generate list outputs
+    cmd: >-
+      go run ./internal/tools/gate packages -platforms {{shellQuote .LINT_PLATFORMS}} -tags {{shellQuote .LINT_TAGS}}
+      -release {{shellQuote .RELEASE_TARGETS}} {{range .OUTPUTS | splitLines}}{{shellQuote .}} {{end}}
+
+  # `go tool -n` builds the linter for this host and prints its path. The
+  # per-pair runs then set GOOS and GOARCH for the linter alone: either in
+  # front of `go tool` itself would build the linter for that pair and fail
+  # to start it here.
+  #
+  # --config names the one config, and it stops every other config read:
+  # golangci-lint otherwise reads the first .golangci file it finds, and
+  # .golangci.json comes before .golangci.yml.
+  lint:
+    desc: run golangci-lint across the module, once per os/arch pair and build tag set
+    vars:
+      LINTER:
+        sh: go tool -n golangci-lint
+    cmds:
+      - task: lint:build
+        vars: { LINTER: '{{.LINTER}}', TAGS: '' }
+      - for: { var: LINT_TAGS, as: TAGS }
+        task: lint:build
+        vars: { LINTER: '{{.LINTER}}', TAGS: '{{.TAGS}}' }
+
+  # One tag set on every pair. Task's matrix loop cannot read a variable a
+  # command computes, so each tag set calls this task instead.
+  lint:build:
+    internal: true
+    cmds:
+      - for: { var: LINT_PLATFORMS, as: PAIR }
+        cmd: >-
+          GOOS={{shellQuote (index (splitList "/" .PAIR) 0)}} GOARCH={{shellQuote (index (splitList "/" .PAIR) 1)}}
+          {{shellQuote .LINTER}} run --config .golangci.yml --build-tags {{shellQuote .TAGS}}
+
+  vet:
+    desc: run go vet, once per os/arch pair and build tag set
+    cmds:
+      - task: vet:build
+        vars: { TAGS: '' }
+      - for: { var: LINT_TAGS, as: TAGS }
+        task: vet:build
+        vars: { TAGS: '{{.TAGS}}' }
+
+  # One tag set on every pair.
+  vet:build:
+    internal: true
+    cmds:
+      - for: { var: LINT_PLATFORMS, as: PAIR }
+        cmd: >-
+          GOOS={{shellQuote (index (splitList "/" .PAIR) 0)}} GOARCH={{shellQuote (index (splitList "/" .PAIR) 1)}}
+          go vet -tags {{shellQuote .TAGS}} ./...
+
+  # ARGS=update regenerates .allow.testpair from current findings.
+  testpair:
+    desc: verify 1:1 source/test file pairing
+    cmd: go tool testpair {{range splitArgs .ARGS}}{{shellQuote .}} {{end}}./cmd/... ./internal/...
+
+  # ARGS=update regenerates .allow.deadcode from current findings. It writes
+  # entries with no category tag and replaces the file header, so the tags go
+  # back by hand and any note left in that file does not survive.
+  #
+  # The wrapper is named by its full package path, because go.mod holds two
+  # tools whose last element is deadcode: this wrapper and the analyzer it
+  # runs, golang.org/x/tools/cmd/deadcode, which the wrapper resolves through
+  # `go tool` and never from PATH.
+  deadcode:
+    desc: report unreachable exported symbols
+    cmd: go tool zach.tools/go/devtools/cmd/deadcode {{range splitArgs .ARGS}}{{shellQuote .}} {{end}}
+
+  # actionlint and zizmor are the readers of workflow YAML. No test in this
+  # repository reads a workflow file. actionlint starts ShellCheck through the
+  # gate, which stands in front of it and refuses any ShellCheck directive in
+  # the decoded script. The canaries prove ShellCheck ran behind the stand-in
+  # and the stand-in ran, because actionlint exits 0 with either absent and no
+  # flag changes that. The gate hands actionlint every tracked workflow by
+  # name, under an empty config of its own, fails unless actionlint reports
+  # linting each one, and refuses a shell: other than bash, sh or pwsh, under
+  # which actionlint hands ShellCheck nothing. zizmor runs
+  # over .github with its one config named, online when `gh auth token`
+  # answers within five seconds and offline otherwise, and the gate fails
+  # unless zizmor logs auditing every tracked workflow. The token reaches
+  # zizmor alone. internal/tools/gate/zizmor.go says the rest.
+  workflows:
+    desc: actionlint with ShellCheck proven present, then zizmor over .github with every ignore rule off
+    vars:
+      ACTIONLINT:
+        sh: go run ./internal/tools/gate mise which actionlint
+      SHELLCHECK:
+        sh: go run ./internal/tools/gate mise which shellcheck
+      ZIZMOR:
+        sh: go run ./internal/tools/gate mise which zizmor
+    cmds:
+      - go run ./internal/tools/gate canary {{shellQuote .ACTIONLINT}} {{shellQuote .SHELLCHECK}}
+      - go run ./internal/tools/gate actionlint {{shellQuote .ACTIONLINT}} {{shellQuote .SHELLCHECK}}
+      - go run ./internal/tools/gate zizmor {{shellQuote .ZIZMOR}}
+
+  # ShellCheck over every tracked .sh file, named on its command line with
+  # --norc, and SHELLCHECK_OPTS never reaches it. The gate reads ShellCheck's
+  # checkstyle report, which names every file it checked, and fails unless it
+  # names each one. A directive in a script reads
+  # `# shellcheck disable=SCnnnn[,SCnnnn] # reason` as its whole line, or the
+  # row refuses it.
+  scripts:
+    desc: shellcheck over every tracked shell script, checked against its list
+    vars:
+      SHELLCHECK:
+        sh: go run ./internal/tools/gate mise which shellcheck
+    cmd: go run ./internal/tools/gate scripts {{shellQuote .SHELLCHECK}}
+
+  # ///// Security /////
+
+  # govulncheck blocks on a reachable call alone, beside the advisory checks
+  # the dependency-review job runs on every pull request. ./... reads the
+  # module's own packages and never a tool directive's dependencies, so the
+  # tool pattern is scanned on its own.
+  vulncheck:
+    desc: scan dependencies for known CVEs reachable from this module and its tools
+    cmds:
+      - go tool govulncheck ./...
+      - go tool govulncheck tool
+
+  # ///// Behavior /////
+
+  # Every test row pipes go test -json through `gate tests`, which fails
+  # unless a test ran and passed and none failed. go test exits 0 when a -run,
+  # -skip or -short in a GOFLAGS the shell exports skips every test.
+  testquick:
+    desc: run the suite without the race detector and with -short, the inner loop
+    cmd: >-
+      go test -json -short -count=1 -timeout {{shellQuote .TEST_TIMEOUT}} {{.GO_TAG_FLAGS}} {{range splitArgs .TEST_TARGET}}{{shellQuote .}} {{end}}
+      | go run ./internal/tools/gate tests
+
+  # scripts/test-race.sh holds the logic, so a caller with no task runner
+  # covers the same packages and makes the same call about whether the
+  # detector can run at all.
+  #
+  # CC is forwarded here because build forwards it. Without it a value given
+  # on the command line reaches only the task that names it, so this gate
+  # selects a different compiler from the one build just used and nothing
+  # says the two disagree.
+  #
+  # The three arrive as shell assignments prefixing the command rather than
+  # through an `env:` block. An `env:` entry is skipped when the same name is
+  # already exported in the calling shell, so a developer carrying CC or
+  # TEST_TARGET in their environment gets that value whatever the command line
+  # says. A prefix assignment always wins, measured.
+  test:
+    desc: run the full suite under the race detector
+    silent: true
+    cmd: >-
+      CC={{shellQuote .CC}} TAGS={{shellQuote .TAGS}} TEST_TARGET={{shellQuote .TEST_TARGET}}
+      TEST_TIMEOUT={{shellQuote .TEST_TIMEOUT}} sh scripts/test-race.sh
+
+  coverage:
+    desc: run testquick under coverage and enforce per-package / total thresholds
+    cmds:
+      - >-
+        go test -json -coverprofile=coverage.out -covermode=atomic -timeout {{shellQuote .TEST_TIMEOUT}} {{.GO_TAG_FLAGS}} {{range splitArgs .TEST_TARGET}}{{shellQuote .}} {{end}}
+        | go run ./internal/tools/gate tests
+      - go tool go-test-coverage --config .testcoverage.yml
+
+  # ///// Artifact /////
+
+  # The twelve settings arrive as shell assignments prefixing the command
+  # rather than through an `env:` block, for the reason test states: an
+  # `env:` entry is skipped when the same name is already exported, and GOOS,
+  # GOARCH, CGO_ENABLED and CC are exactly the names a Go developer carries in
+  # their shell.
+  build:
+    desc: cross-compile binaries into dist/
+    silent: true
+    cmd: >-
+      GOOS={{shellQuote .GOOS}} GOARCH={{shellQuote .GOARCH}} CGO_ENABLED={{shellQuote .CGO_ENABLED}} CC={{shellQuote .CC}}
+      TAGS={{shellQuote .TAGS}} BUILD_TARGET={{shellQuote .BUILD_TARGET}} OUT='dist/'
+      VERSION={{shellQuote .VERSION}} VERSION_PKG={{shellQuote .VERSION_PKG}}
+      REPO_OWNER={{shellQuote .REPO_OWNER}} REPO_NAME={{shellQuote .REPO_NAME}} REMOTE_PKG={{shellQuote .REMOTE_PKG}}
+      sh scripts/build.sh
+
+  # One build per pair in RELEASE_TARGETS, flattened into dist/release/ with
+  # the pair in each file name, which is the flat artifact publish.yml
+  # attaches. cd.yml is the caller; `check` never runs it.
+  release:
+    desc: cross-compile the release binaries for every pair in RELEASE_TARGETS into dist/release/, with SHA256SUMS
+    silent: true
+    cmd: >-
+      RELEASE_TARGETS={{shellQuote .RELEASE_TARGETS}} TAGS={{shellQuote .TAGS}} BUILD_TARGET={{shellQuote .RELEASE_PACKAGES}}
+      VERSION={{shellQuote .VERSION}} VERSION_PKG={{shellQuote .VERSION_PKG}}
+      REPO_OWNER={{shellQuote .REPO_OWNER}} REPO_NAME={{shellQuote .REPO_NAME}} REMOTE_PKG={{shellQuote .REMOTE_PKG}}
+      sh scripts/release.sh
+
+  clean:
+    desc: remove build outputs and coverage profile
+    cmd: rm -rf dist/ coverage.out
+
+  # ///// Aggregates /////
+
+  # The gate. CI's gate job runs this same command on Linux, macOS and
+  # Windows, so a green run here is a green run there. `help` prints every
+  # task with what it checks.
+  check:
+    desc: the gate, in phase order (tools, canonical form, static, security, behavior, artifact)
+    cmds:
+      - task: check:quick
+      - task: test
+      - task: coverage
+
+  # The gate without the test suite, which is what the pre-push hook runs. The
+  # race detector and the coverage run are minutes a contributor pays once, in
+  # CI, on every push.
+  check:quick:
+    desc: the gate without the test rows, for the pre-push hook
+    cmds:
+      - task: tools
+      - task: tidy
+      - task: generate
+      - task: format
+      - task: toml
+      - task: packages
+      - task: lint
+      - task: vet
+      - task: testpair
+      - task: deadcode
+      - task: workflows
+      - task: scripts
+      - task: vulncheck
+      - task: build

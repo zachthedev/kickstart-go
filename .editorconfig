@@ -1,0 +1,14 @@
+# http://editorconfig.org
+root = true
+
+[*]
+indent_style = space
+indent_size = 2
+end_of_line = lf
+charset = utf-8
+trim_trailing_whitespace = true
+insert_final_newline = true
+
+# gofmt writes tabs, and go mod tidy writes them into go.mod and go.sum.
+[{*.go,go.mod,go.sum}]
+indent_style = tab

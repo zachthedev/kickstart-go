@@ -1,0 +1,99 @@
+name: cd
+
+# Everything after a merge. A push to main keeps the release pull request open. Merging that
+# pull request makes the next push tag the merge commit and draft the release, and the same
+# run builds the binaries at that commit, attests them and attaches them to the draft. The
+# publish job runs in the release environment, so the draft flips public after the approval
+# that environment holds. A dispatch on an existing tag rebuilds and reattaches its assets.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: An existing release tag to rebuild, such as v1.2.3. Run it on that tag's ref.
+        type: string
+        required: true
+
+permissions: {}
+
+# One run at a time. The called release-pr and publish jobs queue on their own groups, and this
+# keeps two pushes from building twice. Queued, not canceled, so a release is never half built.
+concurrency:
+  group: cd-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # TODO(kickstart): reset the release state this repository inherits before its first release.
+  # Delete CHANGELOG.md and write {} into .release-please-manifest.json. The first release is
+  # then 0.1.0. Its changelog holds this repository's commits alone. This is the one hand edit
+  # both files take. The go release type keeps no version file. The build stamps the version
+  # from the release tag.
+  #
+  # The called job names the release-pr environment, so its variable and secret resolve from
+  # this repository's environment of that name. This job runs in no environment, so it cannot
+  # pass an environment secret by name. inherit is the one form that reaches it.
+  release-pr:
+    if: github.event_name == 'push'
+    # Every credential the called job uses is the app's, so the job token gets nothing.
+    permissions: {}
+    uses: zachthedev/.github/.github/workflows/release-pr.yml@09a9a00aae657ea11e5d5979ef3ce5859d9aba3a # v0.2.0
+    secrets: inherit
+
+  # The release binaries, built by the gate's release task at the tagged commit. The push
+  # that released is the run whose GITHUB_SHA the tag names, so no ref is passed. A dispatch
+  # runs on the tag's ref, so the checkout is at the tag already.
+  build:
+    needs: [release-pr]
+    # always(), because a dispatch skips release-pr and a skipped need skips its dependents.
+    if: always() && (needs.release-pr.outputs.released == 'true' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      # The tag is a release tag or nothing, before it reaches a command. A dispatch input is a
+      # string anyone with write access types, and it can carry a newline, so the match is over
+      # the whole string in bash and not per line. VERSION is the tag with its v removed, so the
+      # binary reports the release it is.
+      - name: Build the release binaries
+        env:
+          TAG: ${{ needs.release-pr.outputs.tag || inputs.tag }}
+        run: |
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]]; then
+            echo "::error::${TAG} is not a release tag."
+            exit 1
+          fi
+          go tool task release VERSION="${TAG#v}"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release
+          path: dist/release/
+          if-no-files-found: error
+
+  # The called job attests every file in the artifact, attaches them to the draft the tag
+  # names, and on the push that released flips the draft public after the release
+  # environment's approval. A rebuild replaces the assets and leaves the release's state to the
+  # owner, so a rebuilt draft stays a draft until a person flips it.
+  publish:
+    needs: [release-pr, build]
+    if: always() && needs.build.result == 'success'
+    # The called job gets at most what is granted here.
+    permissions:
+      # Uploading to the release and flipping the draft.
+      contents: write
+      # Signing the attestation with this workflow's identity.
+      id-token: write
+      # Recording the attestation.
+      attestations: write
+    uses: zachthedev/.github/.github/workflows/publish.yml@09a9a00aae657ea11e5d5979ef3ce5859d9aba3a # v0.2.0
+    with:
+      tag: ${{ needs.release-pr.outputs.tag || inputs.tag }}
+      artifacts: release
+      flip: ${{ github.event_name == 'push' }}

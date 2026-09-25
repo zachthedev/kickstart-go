@@ -1,0 +1,21 @@
+# zizmor's settings for this repository. Every audit not named here runs at zizmor's defaults.
+# The workflows row names this file with --config. A rule here can turn an audit off, and
+# CODEOWNERS routes every change here to the code owner's review.
+rules:
+  # Every action is pinned to a commit, including the ones GitHub publishes. A tag can be
+  # retargeted by its owner with no pull request and no cooldown, and this is what refuses one.
+  unpinned-uses:
+    config:
+      policies:
+        '*': hash-pin
+  # The one place a finding is waived: the gate refuses an inline ignore comment under .github.
+  # Each entry names a file. A zizmor waiver binds to a file or a line, never to what a job
+  # calls, so the workflows row holds the callee: a pass with no config and no ignores reads
+  # every job that passes `secrets: inherit`, and each must call one of zachthedev/.github's
+  # reusable workflows. The release-pr and deps callers pass inherit because the reusable
+  # workflow in zachthedev/.github reads the app's secrets, and the deps job's environment
+  # secret reaches it by no other form.
+  secrets-inherit:
+    ignore:
+      - cd.yml
+      - deps.yml

@@ -1,0 +1,11 @@
+# Every TOML file this repository authors, formatted by taplo. The toml row
+# lists the tracked TOML files, hands them to taplo fmt --check by name with
+# this config, and fails unless taplo reports checking every one. These
+# patterns still filter what it hands over, so a tracked TOML file they drop
+# fails the row. mise.lock is written by mise lock and carries no .toml
+# extension. The excludes serve a bare taplo fmt, which reads no .gitignore:
+# node_modules, and Claude Code's worktrees, each of which holds its own copy
+# of every file here. CODEOWNERS routes every change here to the code owner's
+# review.
+include = ["**/*.toml"]
+exclude = ["node_modules/**", ".claude/worktrees/**"]
