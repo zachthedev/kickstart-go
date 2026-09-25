@@ -344,9 +344,9 @@ online when `gh auth token` answers, and its summary says which mode ran.
 
 The shared `commits` and `workflows` jobs refuse, before a merge, the data files that run code in Bun or bun
 install, and the gate does not repeat them: a tracked env file at the root, a tracked `node_modules` path or
-`.npmrc`, a `patchedDependencies` key, a `bunfig.toml` key beyond the cooldown, an inline zizmor waiver, a root file
-named like a program a gate starts, a root entry named `'`, and a `secrets: inherit` call into anything but
-`zachthedev/.github`'s reusable workflows. A pull request cannot edit either job.
+`.npmrc`, a `patchedDependencies` key, a `bunfig.toml` key beyond the cooldown, a root file named like a program a
+gate starts, a root entry named `'`, and a `secrets: inherit` call into anything but `zachthedev/.github`'s
+reusable workflows. A pull request cannot edit either job.
 
 A reviewer, not the gate, refuses a tracked file no row checks: anything under `dist/`, `coverage/`,
 `.claude/worktrees/` or a `.git`, `.sl`, `.svn`, `.hg` or `.jj` directory, a JavaScript or declaration file beyond
@@ -367,6 +367,9 @@ refuses:
 - Anything under `vendor/`, which go builds from in place of the module cache when no `-mod` flag is set.
 - A workflow whose extension is anything but `.yml`, the one spelling actionlint's list and zizmor's collection
   both match.
+- An inline `zizmor: ignore[...]` comment anywhere under `.github`. A waiver lives in the rules of
+  `.github/zizmor.yml`, with the file it covers. The `workflows` job refuses one too, but its search skips a file
+  `.gitattributes` marks binary, and the gate reads every file itself.
 - A `replace`, `godebug` or `ignore` line in `go.mod`. An `ignore` line takes its directories out of every `./...`
   row.
 

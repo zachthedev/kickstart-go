@@ -555,14 +555,15 @@ func TestCountFiles(t *testing.T) {
 	assert.Equal(t, "0 files", countFiles(0, ""))
 }
 
-// Each case hands the check tracked paths, and the check must refuse a
-// workflow whose extension is not a lowercase .yml, and let every other path
-// pass. A path under a version control directory, and an inline zizmor
-// waiver, are review's and the shared workflows job's to refuse.
+// Each case hands the check tracked paths, with the content of any it reads,
+// and the check must refuse a workflow whose extension is not a lowercase
+// .yml and an inline zizmor waiver anywhere under .github, and let every other
+// path pass. A path under a version control directory is review's to refuse.
 func TestWalkedFindings(t *testing.T) {
 	tests := []struct {
 		name    string
 		tracked []string
+		files   map[string]string
 		wantIn  string
 	}{
 		{name: "a workflow in capitals", tracked: []string{".github/workflows/UP.YML"}, wantIn: `".github/workflows/UP.YML" is a workflow named .YML, and every workflow here ends in .yml`},
@@ -572,10 +573,44 @@ func TestWalkedFindings(t *testing.T) {
 		{name: "a YAML file beside the workflows", tracked: []string{".github/dependabot.YAML"}},
 		{name: "a YAML file one level below the workflows", tracked: []string{".github/workflows/nested/x.YAML"}},
 		{name: "a path under a version control directory, which review holds", tracked: []string{"docs/.git/notes.md", ".JJ/repo/x.yml"}},
+		{
+			name: "an inline zizmor waiver in a workflow", tracked: []string{".github/workflows/cd.yml"},
+			files:  map[string]string{".github/workflows/cd.yml": "jobs:\n  a:\n    secrets: inherit # zizmor: ignore[secrets-inherit]\n"},
+			wantIn: `".github/workflows/cd.yml" carries an inline zizmor ignore comment, which waives an audit outside .github/zizmor.yml`,
+		},
+		{
+			name: "an inline waiver in a file .gitattributes marks binary, which git grep -I skips", tracked: []string{".gitattributes", ".github/workflows/cd.yml"},
+			files: map[string]string{
+				".gitattributes":           ".github/workflows/cd.yml -diff\n",
+				".github/workflows/cd.yml": "jobs:\n  a:\n    secrets: inherit # zizmor: ignore[secrets-inherit]\n",
+			},
+			wantIn: `".github/workflows/cd.yml" carries an inline zizmor ignore comment`,
+		},
+		{
+			name: "an inline waiver spelled another way, in a directory in capitals", tracked: []string{".GitHub/actions/x/action.yml"},
+			files:  map[string]string{".GitHub/actions/x/action.yml": "runs: # ZIZMOR:ignore[unpinned-uses]\n"},
+			wantIn: "carries an inline zizmor ignore comment",
+		},
+		{
+			name: "an inline waiver outside .github, which zizmor never reads", tracked: []string{"docs/usage.md"},
+			files: map[string]string{"docs/usage.md": "# zizmor: ignore[x]\n"},
+		},
+		{
+			name: "zizmor.yml, whose rules are the one waiver list", tracked: []string{zizmorConfig},
+			files: map[string]string{zizmorConfig: "rules:\n  secrets-inherit:\n    ignore:\n      - cd.yml\n"},
+		},
+		{name: "a tracked file the work tree deleted", tracked: []string{".github/workflows/gone.yml"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			found := walkedFindings(tt.tracked)
+			dir := t.TempDir()
+			for name, content := range tt.files {
+				target := filepath.Join(dir, filepath.FromSlash(name))
+				require.NoError(t, os.MkdirAll(filepath.Dir(target), 0o700))
+				require.NoError(t, os.WriteFile(target, []byte(content), 0o600))
+			}
+			found, err := walkedFindings(dir, tt.tracked)
+			require.NoError(t, err)
 			if tt.wantIn == "" {
 				assert.Empty(t, found)
 				return
@@ -584,6 +619,13 @@ func TestWalkedFindings(t *testing.T) {
 			assert.Contains(t, found[0], tt.wantIn)
 		})
 	}
+
+	t.Run("a tracked path under .github that is a directory is an error", func(t *testing.T) {
+		dir := t.TempDir()
+		require.NoError(t, os.MkdirAll(filepath.Join(dir, ".github", "x"), 0o700))
+		_, err := walkedFindings(dir, []string{".github/x"})
+		assert.ErrorContains(t, err, "reading .github/x")
+	})
 }
 
 func TestEscaped(t *testing.T) {

@@ -8,8 +8,8 @@ rules:
     config:
       policies:
         '*': hash-pin
-  # The one place a finding is waived: the shared workflows job refuses an inline ignore comment
-  # under .github. Each entry names a file. A zizmor waiver binds to a file or a line, never to
+  # The one place a finding is waived: the gate and the shared workflows job refuse an inline
+  # ignore comment under .github. Each entry names a file. A zizmor waiver binds to a file or a line, never to
   # what a job calls, so the shared workflows job holds the callee: a pass with no config and no
   # ignores reads every job that passes `secrets: inherit`, and each must call one of
   # zachthedev/.github's reusable workflows. The release-pr and deps callers pass inherit

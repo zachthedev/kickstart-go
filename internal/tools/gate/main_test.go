@@ -140,8 +140,9 @@ func TestRun_Pins(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Dir(workflow), 0o700))
 	require.NoError(t, os.WriteFile(workflow, []byte("jobs: {} # zizmor: ignore[excessive-permissions]\n"), 0o600))
 	gitRun("add", "--force", ".github/workflows/ci.yaml")
-	t.Run("a workflow a row would skip exits 1 and names it", func(t *testing.T) {
+	t.Run("a workflow a row would skip exits 1 and names both reasons", func(t *testing.T) {
 		pins(t, 1, `".github/workflows/ci.yaml" is a workflow named .yaml`)
+		pins(t, 1, `".github/workflows/ci.yaml" carries an inline zizmor ignore comment`)
 	})
 	gitRun("rm", "--cached", "--quiet", ".github/workflows/ci.yaml")
 	require.NoError(t, os.RemoveAll(filepath.Join(dir, ".github")))

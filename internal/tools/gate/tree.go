@@ -91,7 +91,7 @@ var rootRefused = []struct {
 // gate (startupFindings), a config the gate names no program to read,
 // tracked or on disk (searchFindings), a go.mod directive that reaches the
 // gate's own build or narrows ./... (goModFindings), and a workflow the
-// workflows rows would skip (walkedFindings).
+// workflows rows would skip or an inline zizmor waiver (walkedFindings).
 func treeFindings(dir string, tracked trackedLister) ([]string, error) {
 	found, err := configFindings(dir)
 	if err != nil {
@@ -126,7 +126,11 @@ func treeFindings(dir string, tracked trackedLister) ([]string, error) {
 		return nil, err
 	}
 	found = append(found, module...)
-	return append(found, walkedFindings(paths)...), nil
+	walked, err := walkedFindings(dir, paths)
+	if err != nil {
+		return nil, err
+	}
+	return append(found, walked...), nil
 }
 
 // configFindings refuses every mise configuration or lock file under dir
