@@ -71,9 +71,23 @@ func TestStartupFindings_Tracked(t *testing.T) {
 		{name: "a vendor directory below the root, which go never reads", tracked: []string{"docs/vendor/a.md"}},
 		{name: "a directory that only starts like vendor", tracked: []string{"vendored/a.go"}},
 		{
-			name:    "patchedDependencies, which the commits job refuses",
+			name:    "patchedDependencies at the root",
 			tracked: []string{"package.json"},
 			files:   map[string]string{"package.json": `{"patchedDependencies": {"prettier@3.9.8": "patches/p.patch"}}`},
+			wantIn:  `"package.json" carries patchedDependencies, and bun install applies them`,
+		},
+		{
+			name:    "patchedDependencies below the root, even empty",
+			tracked: []string{"docs/package.json"},
+			files:   map[string]string{"docs/package.json": `{"patchedDependencies": {}}`},
+			wantIn:  `"docs/package.json" carries patchedDependencies`,
+		},
+		{
+			name:    "patchedDependencies beside a value nested 300 deep, past the runner's jq and within Bun's reach",
+			tracked: []string{"package.json"},
+			files: map[string]string{"package.json": `{"patchedDependencies": {"left-pad@1.3.0": "patches/p.patch"}, "deep": ` +
+				strings.Repeat("[", 300) + strings.Repeat("]", 300) + `}`},
+			wantIn: `"package.json" carries patchedDependencies`,
 		},
 		{
 			name:    "a duplicated patchedDependencies, where Bun reads the first and jq and Go the last",
@@ -122,9 +136,10 @@ func TestStartupFindings_Tracked(t *testing.T) {
 			files:   map[string]string{"package.json": `{"description": "cosmiconfig"}`},
 		},
 		{
-			name:    "a root package.json that is not an object, which carries no key",
-			tracked: []string{"package.json"},
-			files:   map[string]string{"package.json": `["cosmiconfig"]`},
+			name:    "a package.json that is not an object, which jq's has fails on",
+			tracked: []string{"docs/package.json"},
+			files:   map[string]string{"docs/package.json": `["patchedDependencies"]`},
+			wantIn:  `"docs/package.json" is not a JSON object`,
 		},
 		{
 			name:    "the root package.json as it stands",

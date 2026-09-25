@@ -10,9 +10,9 @@ set: [errexit, pipefail]
 # Local build settings, loaded into the environment of every task. A missing
 # file is the ordinary case; `.env.template` documents what may go in here.
 # The shared commits job refuses a tracked copy before a merge, because every
-# task would load it. This line loads the file before any task's first
-# command, so CI and the push hook run `gate pins` on its own before they
-# start task.
+# task would load it. CI and the push hook run `gate pins` on its own before
+# they start task, so the tree rules, the duplicate-key check included, run
+# before bun install reads package.json.
 dotenv: ['.env']
 
 # Every go command a task runs reads go.mod alone, never a go.work, which
@@ -392,7 +392,9 @@ tasks:
   # ///// Tree rules /////
 
   # The tree rules again, after a row that ran repository code, which can
-  # write any file a later row reads.
+  # write any file a later row reads. They re-run the named refusals such a
+  # row can plant, such as a second Taskfile, a go.work or a mise config,
+  # and they do not detect a tracked file the row changed.
   tree:
     internal: true
     cmd: go run ./internal/tools/gate pins
@@ -403,7 +405,7 @@ tasks:
   # Windows, so a green run here is a green run there. `help` prints every
   # task with what it checks.
   check:
-    desc: the gate, the rows that run no repository code first, then each code row with the tree rules after it
+    desc: the gate, the rows meant to run no repository code first, then each code row with the tree rules after it
     cmds:
       - task: check:quick
       - task: test
@@ -413,9 +415,12 @@ tasks:
 
   # The gate without the test suite, which is what the pre-push hook runs. The
   # race detector and the coverage run are minutes a contributor pays once, in
-  # CI, on every push. The rows that run no repository code go first. Then
-  # each code row runs, generate and packages through cmd/generate and build
-  # through scripts/build.sh, with the tree rules after it.
+  # CI, on every push. The rows meant to run no repository code go first,
+  # though a review-held .prettierrc plugin or bunfig.toml preload runs in
+  # the format row, and a root ' entry, which the shared workflows job
+  # refuses, runs in the workflows row on Linux and macOS. Then each code row
+  # runs, generate and packages through cmd/generate and build through
+  # scripts/build.sh, with the tree rules after it.
   check:quick:
     desc: the gate without the test rows, for the pre-push hook
     cmds:

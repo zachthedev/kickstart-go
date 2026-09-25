@@ -1,6 +1,6 @@
 # kickstart-go, a `go-cli` template repository
 
-<!-- TODO(kickstart): name your repository and its handbook kind on the line above. -->
+<!-- TODO(kickstart): name your repository and its kind on the line above. -->
 
 [README.md](README.md) says what it is.
 

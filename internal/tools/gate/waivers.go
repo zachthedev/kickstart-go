@@ -30,7 +30,7 @@ const (
 	// reasonMarker opens the reason of a #nosec waiver.
 	reasonMarker = "--"
 	// invisibleReasonWhy is what every refusal of an invisible reason says.
-	invisibleReasonWhy = "whose reason is empty once its invisible code points are dropped, and the linter reads those as a reason. Write the reason in visible text"
+	invisibleReasonWhy = "whose reason holds no letter or number once its invisible code points are dropped, and the linter reads any character as a reason. Write the reason in words"
 )
 
 // ///////////////////////////////////////////////
@@ -169,18 +169,19 @@ func nosecLine(files *token.FileSet, group *ast.CommentGroup) int {
 	return files.Position(group.Pos()).Line
 }
 
-// invisibleReason reports whether reason reads empty once every
-// default-ignorable code point is dropped and the white space around it is
-// trimmed. A reason made of those code points alone looks empty on screen and
-// passes every linter's check for a reason.
+// invisibleReason reports whether reason holds no letter and no number once
+// every default-ignorable code point is dropped. nolintlint and gosec accept
+// any reason that survives white space trimming, so a reason made of a blank
+// braille cell, a lone combining mark or a private-use point passes them and
+// looks empty on screen. The drop comes first, because the Hangul fillers are
+// letters and default-ignorable at once.
 func invisibleReason(reason string) bool {
-	visible := strings.Map(func(r rune) rune {
-		if defaultIgnorable(r) {
-			return -1
+	for _, r := range reason {
+		if !defaultIgnorable(r) && (unicode.IsLetter(r) || unicode.IsNumber(r)) {
+			return false
 		}
-		return r
-	}, reason)
-	return strings.TrimSpace(visible) == ""
+	}
+	return true
 }
 
 // defaultIgnorable reports whether r has Unicode's Default_Ignorable_Code_Point

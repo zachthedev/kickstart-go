@@ -77,8 +77,8 @@ What reaches the tools from your own environment:
   `bun run audit`, run no module from a `--preload` in it. The gate withholds it from the processes it starts, and
   a tool started through `bunx --bun --no-install` does not read it. Leave it unset.
 - `BUN_INSPECT`, `BUN_INSPECT_CONNECT_TO` and `BUN_INSPECT_PRELOAD`. Leave all three unset. The gate passes them
-  to the programs it starts, and each changes how Bun runs: `BUN_INSPECT_PRELOAD` runs a module, and the other two
-  open Bun's inspector.
+  to the programs it starts. Bun reads them in a direct start, where `BUN_INSPECT_PRELOAD` runs a module and the
+  other two open its inspector. A tool started through `bunx --bun --no-install` ran no such preload.
 - A personal env file. `bunx` ignores `--no-env-file`, so Prettier and commitlint load an untracked `.env`,
   `.env.local` or another name Bun loads from the root. `Taskfile.yml` loads `.env` into every task.
   [Troubleshooting](#troubleshooting) says what that can change.
@@ -268,16 +268,20 @@ push hook runs it.
 Go files the way the lint row wants them, `testquick` is the inner loop, `build` and `release` produce binaries.
 `go tool task <task>` runs one of them.
 
-The rows that run no repository code go first. Then each row that does runs, `generate` and `packages` through
-`cmd/generate`, `build` through `scripts/build.sh`, and the test rows, with the tree rules of `gate pins` after it.
-Repository code can write any file a later row reads.
+The rows meant to run no repository code go first. Then each row that does runs, `generate` and `packages`
+through `cmd/generate`, `build` through `scripts/build.sh`, and the test rows, with the tree rules of `gate pins`
+after it. Repository code can write any file a later row reads. The tree rules re-run the named refusals such a
+row can plant, such as a second Taskfile, a `go.work` or a mise config, and they do not detect a tracked file the
+row changed. The first rows can run code too: the format row runs a `.prettierrc` plugin or a `bunfig.toml`
+preload, which review holds, and on Linux and macOS the workflows row runs a root entry named `'`, which the
+shared `workflows` job refuses.
 
 The first row reads `mise.toml` and `mise.lock` against the expectations in `internal/tools/gate/pins.go` and
 installs from the lockfile only after that read passes. `mise.lock` pins `linux-x64`, `macos-arm64` and
 `windows-x64`, and a contributor on another platform relocks in a pull request.
 
-CI and the push hook run `go run ./internal/tools/gate pins` on its own before `go tool task`, because Task loads
-`.env` into every task before the first command. CI's gate job and both push-hook jobs set `GOWORK=off` and
+CI and the push hook run `go run ./internal/tools/gate pins` on its own before `go tool task`, so the tree rules,
+the duplicate-key check included, run before `bun install` reads `package.json`. CI's gate job and both push-hook jobs set `GOWORK=off` and
 `GOFLAGS=-mod=readonly`, so every go command reads `go.mod` alone, never a `go.work`, and builds nothing from a
 `vendor/` directory. A tracked `go.work` could otherwise replace a dependency of the gate itself with code from the
 branch, before `gate pins` refuses the file. `go.mod` still decides the gate's own build: a `replace` builds a
@@ -346,12 +350,14 @@ The shared `commits` and `workflows` jobs refuse, before a merge, the data files
 install, and the gate does not repeat them: a tracked env file at the root, a tracked `node_modules` path or
 `.npmrc`, a `patchedDependencies` key, a `bunfig.toml` key beyond the cooldown, a root file named like a program a
 gate starts, a root entry named `'`, and a `secrets: inherit` call into anything but `zachthedev/.github`'s
-reusable workflows. A pull request cannot edit either job.
+reusable workflows. A pull request cannot change what either job runs at its pinned commit. It can change
+`ci.yml`'s call, and that change waits on the code owner's review like the gate's code.
 
 A reviewer, not the gate, refuses a tracked file no row checks: anything under `dist/`, `coverage/`,
 `.claude/worktrees/` or a `.git`, `.sl`, `.svn`, `.hg` or `.jj` directory, a JavaScript or declaration file beyond
 the ones a tool needs, such as `commitlint.config.js`, a personal file such as `.claude/settings.local.json`, and a
-Go package under an `_` directory or below a second `go.mod` ([Where code goes](#where-code-goes)). Each sits in
+Go package under an `_` directory or below a second `go.mod`, or a package under `testdata` that a build imports
+([Where code goes](#where-code-goes)). Each sits in
 the diff and no row reads it. `.prettierrc` holds formatting options alone, and a reviewer refuses a `plugins` key
 or a string value, since Prettier loads either as code.
 

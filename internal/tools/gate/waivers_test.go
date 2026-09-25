@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -42,6 +43,20 @@ var invisibleCodePoints = []struct {
 	{name: "a language tag", r: 0xE0001},
 	{name: "a tag space", r: 0xE0020},
 	{name: "a supplementary variation selector", r: 0xE0100},
+}
+
+// blankCodePoints render as nothing a reader can take for a reason and are not
+// default-ignorable, so a reason made of one alone must be refused as well:
+// a blank braille cell, a lone combining mark, a private-use point, and a
+// Hangul filler, which is a letter and default-ignorable at once.
+var blankCodePoints = []struct {
+	name string
+	r    rune
+}{
+	{name: "a blank braille cell", r: 0x2800},
+	{name: "a lone combining acute accent", r: 0x0301},
+	{name: "a private-use point", r: 0xE000},
+	{name: "a Hangul filler, a letter the drop removes first", r: 0x3164},
 }
 
 // Each case is one comment as the parser hands it over, markers included. The
@@ -154,9 +169,9 @@ func TestGoWaiverFindings(t *testing.T) {
 		found, err := goWaiverFindings(dir, []string{"rt.go"})
 		require.NoError(t, err)
 		require.Len(t, found, 3, "findings: %q", found)
-		assert.Contains(t, found[2], fmt.Sprintf("rt.go:21 carries %q, whose reason is empty", "#nosec G304 -- "+string(rune(0x2060))+"\n"))
-		assert.Contains(t, found[0], `rt.go:7 carries "//nolint:errcheck // \u200b", whose reason is empty once its invisible code points are dropped`)
-		assert.Contains(t, found[1], `rt.go:8 carries "#nosec G306 -- \u00ad\n", whose reason is empty`)
+		assert.Contains(t, found[2], fmt.Sprintf("rt.go:21 carries %q, whose reason holds no letter", "#nosec G304 -- "+string(rune(0x2060))+"\n"))
+		assert.Contains(t, found[0], `rt.go:7 carries "//nolint:errcheck // \u200b", whose reason holds no letter or number once its invisible code points are dropped`)
+		assert.Contains(t, found[1], `rt.go:8 carries "#nosec G306 -- \u00ad\n", whose reason holds no letter`)
 	})
 }
 
@@ -202,10 +217,11 @@ func TestInvisibleReason(t *testing.T) {
 		{name: "spaces", input: " \t ", want: true},
 		{name: "a no-break space, which the linters trim too", input: " \U000000A0", want: true},
 		{name: "invisible code points around a visible one", input: "\U0000200Bx\U000000AD"},
-		{name: "a visible character alone", input: "-"},
+		{name: "a dash alone, which holds no letter or number", input: "-", want: true},
+		{name: "a number alone", input: "7"},
 		{name: "several invisible code points", input: " \U0000200B\U0000200C\U00002060\U0000FEFF ", want: true},
 	}
-	for _, point := range invisibleCodePoints {
+	for _, point := range slices.Concat(invisibleCodePoints, blankCodePoints) {
 		tests = append(tests, struct {
 			name  string
 			input string
@@ -233,7 +249,7 @@ func TestWaiverRefusal_InvisibleReason(t *testing.T) {
 		{name: "a reason marker with nothing after it", text: "//nolint:errcheck //", wantIn: invisibleReasonWhy},
 		{name: "no reason marker, which nolintlint refuses itself", text: "//nolint:errcheck"},
 	}
-	for _, point := range invisibleCodePoints {
+	for _, point := range slices.Concat(invisibleCodePoints, blankCodePoints) {
 		tests = append(tests, struct {
 			name   string
 			text   string
@@ -270,7 +286,7 @@ func TestNosecRefusal(t *testing.T) {
 		{name: "extra dashes before an invisible reason", group: "#nosec G306 --- \U0000200B\n", refuse: true},
 		{name: "a nosec after prose on its own line", group: "The path is fixed.\n#nosec G304 -- \U00002060\n", refuse: true},
 	}
-	for _, point := range invisibleCodePoints {
+	for _, point := range slices.Concat(invisibleCodePoints, blankCodePoints) {
 		tests = append(tests, struct {
 			name   string
 			group  string

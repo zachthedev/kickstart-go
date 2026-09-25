@@ -58,8 +58,10 @@ var bunEnvFiles = []string{
 //
 //   - an env file Bun loads, below the root, which the commits job reads at the
 //     root alone
-//   - a package.json carrying a duplicated key at any depth, and a root one
-//     carrying a cosmiconfig key, which the commits job reads nowhere
+//   - a package.json carrying a duplicated key at any depth, one that is no
+//     JSON object, one carrying patchedDependencies, which the commits job's
+//     check passes when jq fails, and a root one carrying a cosmiconfig key,
+//     which the commits job reads nowhere
 //   - a vendor directory at the root, which go builds from in place of the
 //     module cache unless a -mod flag says otherwise, while CI's gate sets
 //     -mod=readonly
@@ -109,10 +111,15 @@ func trackedUnder(quoted []string, dir, why string) string {
 // valid JSON under RFC 7493, which refuses a duplicated key at any depth. Bun
 // keeps the first copy of a key, while jq, which the shared commits job reads
 // the file with, and Go keep the last, so a duplicate lets a check read a value
-// Bun never uses. At the root it also refuses a cosmiconfig key: commitlint
-// searches through cosmiconfig, which reads that key as its meta config
-// whatever config commitlint names, and an $import there runs a module. A
-// tracked file the work tree has deleted passes, because nothing can read it.
+// Bun never uses. It refuses patchedDependencies, which bun install applies to
+// the code of the packages it installs, even frozen and without scripts. The
+// shared commits job checks that key with jq inside a test, where a jq failure
+// passes the file, and the runner's jq stops at a depth of 256 while Bun reads
+// 10,000, so the gate keeps this copy until that step fails closed on a jq
+// error. At the root it also refuses a cosmiconfig key: commitlint searches
+// through cosmiconfig, which reads that key as its meta config whatever config
+// commitlint names, and an $import there runs a module. A tracked file the
+// work tree has deleted passes, because nothing can read it.
 func packageFindings(dir, name string) ([]string, error) {
 	data, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(name)))
 	if errors.Is(err, fs.ErrNotExist) {
@@ -124,18 +131,18 @@ func packageFindings(dir, name string) ([]string, error) {
 	if !jsontext.Value(data).IsValid() {
 		return []string{fmt.Sprintf("%q is not valid JSON under RFC 7493, which refuses a duplicated key at any depth. Bun keeps the first copy of a key and jq and Go the last, so no check can tell what Bun reads", name)}, nil
 	}
-	if path.Dir(name) != "." {
-		return nil, nil
-	}
-	// A root package.json that is valid JSON and no object carries no key for
-	// cosmiconfig to read.
 	var fields map[string]json.RawMessage
-	if json.Unmarshal(data, &fields) == nil {
-		if _, ok := fields[metaConfigKey]; ok {
-			return []string{fmt.Sprintf("%q carries a %s key, which cosmiconfig reads as commitlint's meta config whatever config commitlint names, and an $import there runs a module. Remove the key", name, metaConfigKey)}, nil
-		}
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return []string{fmt.Sprintf("%q is not a JSON object, so nothing here can tell what bun install reads from it: %s", name, strconv.Quote(err.Error()))}, nil
 	}
-	return nil, nil
+	var found []string
+	if _, ok := fields["patchedDependencies"]; ok {
+		found = append(found, fmt.Sprintf("%q carries patchedDependencies, and bun install applies them to the code of the packages it installs, the ones the gate and the hooks run included. Remove the key", name))
+	}
+	if _, ok := fields[metaConfigKey]; ok && path.Dir(name) == "." {
+		found = append(found, fmt.Sprintf("%q carries a %s key, which cosmiconfig reads as commitlint's meta config whatever config commitlint names, and an $import there runs a module. Remove the key", name, metaConfigKey))
+	}
+	return found, nil
 }
 
 // excerpt quotes the start of a file's text for a finding, so a control

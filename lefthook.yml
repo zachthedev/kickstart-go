@@ -60,7 +60,8 @@ pre-push:
     - name: go-mod
       run: sh scripts/go-mod-check.sh
 
-    # The pins checks on their own, before task loads .env into every task.
+    # The pins checks on their own, before task starts, as CI's gate job runs
+    # them before bun install reads package.json.
     # Both jobs read go.mod alone, as CI's gate job does: a tracked go.work
     # could replace a dependency of the gate itself, and go builds from a
     # tracked vendor/ when no -mod flag is set.

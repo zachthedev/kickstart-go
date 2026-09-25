@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -205,7 +206,7 @@ func TestDirectiveFindings_InvisibleReason(t *testing.T) {
 		{name: "a reason opening with an invisible code point", reason: "\U0000200BTAGS is split on purpose."},
 		{name: "invisible code points and spaces", reason: "\U0000200B \U00002060 ", refused: true},
 	}
-	for _, point := range invisibleCodePoints {
+	for _, point := range slices.Concat(invisibleCodePoints, blankCodePoints) {
 		tests = append(tests, struct {
 			name    string
 			reason  string
