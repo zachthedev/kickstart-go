@@ -101,12 +101,17 @@ func canaryFindings(run commandRunner, actionlint, shellCheck string) ([]string,
 		if err := os.WriteFile(workflow, []byte(canary.text), 0o600); err != nil {
 			return nil, err
 		}
-		// A finding makes actionlint exit 1, which is the outcome this check wants.
+		// A finding makes actionlint exit 1, which is the outcome this check
+		// wants. Any other exit means actionlint failed, and the finding says
+		// so rather than guess what ShellCheck did.
 		out, err := run(actionlint, nil, "-shellcheck="+shellCheck, "-pyflakes=", "-config-file", config, workflow)
 		if err != nil {
 			return nil, fmt.Errorf("running %s: %w", actionlint, err)
 		}
-		if !bytes.Contains(withoutEscapes(out.stdout), []byte(canary.want)) {
+		switch {
+		case out.code != 0 && out.code != 1:
+			found = append(found, fmt.Sprintf("actionlint exited %d over %s, so the canary proves nothing. actionlint printed: %s%s", out.code, canary.name, out.stdout, out.stderr))
+		case !bytes.Contains(withoutEscapes(out.stdout), []byte(canary.want)):
 			found = append(found, fmt.Sprintf("%s. Check that %s starts. actionlint printed: %s%s", canary.missing, shellCheck, out.stdout, out.stderr))
 		}
 	}

@@ -1,10 +1,16 @@
 # Git hooks, installed once after cloning with `go tool lefthook install`.
 # lefthook is a go.mod tool directive, so the hook scripts resolve it through
-# `go tool` and nothing is fetched at commit time. commitlint is a package.json
-# pin, and bun runs its entry point by path under node_modules, so a clone with
-# no node_modules refuses every commit until `bun install` runs. bunx would
-# fall back to PATH, a node_modules/.bin above the checkout, or the latest
-# release in its cache, and hand a node shebang to whatever node PATH names.
+# `go tool` and nothing is fetched at commit time.
+#
+# commitlint is a package.json pin, and it starts through
+# `bunx --bun --no-install`, which runs the copy node_modules/.bin holds,
+# under Bun rather than a `node` on PATH, and fetches nothing. With no copy
+# there, bunx runs one from a parent directory, PATH or its own cache, so the
+# install runs after every pull, every branch switch and in every worktree
+# (CONTRIBUTING.md#setup). bunx ignores --no-env-file, so a personal env file
+# reaches the tool. A hook runs in your own environment and clears nothing
+# from it: hooks are not a control, and CI's gate and commits job decide the
+# merge (CONTRIBUTING.md#safety).
 glob_matcher: doublestar
 
 commit-msg:
@@ -13,13 +19,8 @@ commit-msg:
     # Conventional Commits specification and the scopes from
     # .github/commit-scopes.json, both by way of commitlint.config.js.
     # --config names that file, which stops commitlint's search for any other.
-    # --no-env-file keeps Bun from loading an env file on disk into commitlint.
-    # The loop first unsets BUN_OPTIONS, BUN_INSPECT, BUN_INSPECT_CONNECT_TO
-    # and BUN_INSPECT_PRELOAD in every spelling, so no flag or preload from the
-    # shell reaches this Bun. An empty BUN_INSPECT_PRELOAD makes Bun exit 1, so
-    # the names are unset rather than emptied.
     - name: commitlint
-      run: for name in $(env | cut -d= -f1 | grep -ixE 'bun_options|bun_inspect|bun_inspect_connect_to|bun_inspect_preload'); do unset "$name"; done; bun --no-env-file ./node_modules/@commitlint/cli/cli.js --config commitlint.config.js --edit {1}
+      run: bunx --bun --no-install commitlint --config commitlint.config.js --edit {1}
 
 pre-commit:
   jobs:

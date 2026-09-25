@@ -190,3 +190,43 @@ func TestDirectiveFindings(t *testing.T) {
 		assert.ErrorContains(t, err, "reading x.sh")
 	})
 }
+
+// Each case is a directive in the one form the set allows, whose reason the
+// form's \S accepts. The check must refuse a reason that is empty once its
+// default-ignorable code points are dropped, one case per code point, and pass
+// one that reads.
+func TestDirectiveFindings_InvisibleReason(t *testing.T) {
+	tests := []struct {
+		name    string
+		reason  string
+		refused bool
+	}{
+		{name: "a reason that reads", reason: "TAGS is split on purpose."},
+		{name: "a reason opening with an invisible code point", reason: "\U0000200BTAGS is split on purpose."},
+		{name: "invisible code points and spaces", reason: "\U0000200B \U00002060 ", refused: true},
+	}
+	for _, point := range invisibleCodePoints {
+		tests = append(tests, struct {
+			name    string
+			reason  string
+			refused bool
+		}{name: point.name, reason: string(point.r), refused: true})
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			script := filepath.Join(root, "scripts", "x.sh")
+			require.NoError(t, os.MkdirAll(filepath.Dir(script), 0o700))
+			require.NoError(t, os.WriteFile(script, []byte("#!/bin/sh\n# shellcheck disable=SC2086 # "+tt.reason+"\necho $X\n"), 0o600))
+			found, err := directiveFindings(root, []string{"scripts/x.sh"})
+			require.NoError(t, err)
+			if !tt.refused {
+				assert.Empty(t, found)
+				return
+			}
+			require.Len(t, found, 1)
+			assert.Contains(t, found[0], "scripts/x.sh:2 carries")
+			assert.Contains(t, found[0], invisibleReasonWhy)
+		})
+	}
+}

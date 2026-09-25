@@ -25,13 +25,13 @@
 //	                                          gh holds a token, checked against
 //	                                          every tracked workflow
 //	gate packages -platforms <pairs>          the packages ./... matches,
-//	  -tags <sets> -release <pairs>           counted, with none a build
-//	  [<generated>...]                        reaches left out, no Go file
-//	                                          outside every build lint and
+//	  -tags <sets> -release <pairs>           counted, with no Go file
+//	  [<generated>...]                        outside every build lint and
 //	                                          vet read, no lax generated
 //	                                          marker outside the files
 //	                                          cmd/generate writes, and no
 //	                                          inline waiver no linter checks
+//	                                          or whose reason is invisible
 //	go test -json ... | gate tests            the tests go test ran, failing
 //	                                          when none ran, every one
 //	                                          skipped or one failed

@@ -1,13 +1,48 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// invisibleCodePoints are the default-ignorable code points a reason can be
+// made of, one per source the property draws from: format characters,
+// Other_Default_Ignorable_Code_Point, variation selectors and tag characters.
+// Each alone looks like no reason at all, and each must be refused as one.
+var invisibleCodePoints = []struct {
+	name string
+	r    rune
+}{
+	{name: "a soft hyphen", r: 0x00AD},
+	{name: "a combining grapheme joiner", r: 0x034F},
+	{name: "an Arabic letter mark", r: 0x061C},
+	{name: "a Hangul choseong filler", r: 0x115F},
+	{name: "a Hangul jungseong filler", r: 0x1160},
+	{name: "a Khmer inherent vowel", r: 0x17B4},
+	{name: "a Mongolian vowel separator", r: 0x180E},
+	{name: "a Mongolian free variation selector", r: 0x180B},
+	{name: "a zero-width space", r: 0x200B},
+	{name: "a zero-width non-joiner", r: 0x200C},
+	{name: "a zero-width joiner", r: 0x200D},
+	{name: "a left-to-right mark", r: 0x200E},
+	{name: "a left-to-right embedding", r: 0x202A},
+	{name: "a word joiner", r: 0x2060},
+	{name: "a left-to-right isolate", r: 0x2066},
+	{name: "a Hangul filler", r: 0x3164},
+	{name: "a variation selector", r: 0xFE0F},
+	{name: "a zero-width no-break space", r: 0xFEFF},
+	{name: "a halfwidth Hangul filler", r: 0xFFA0},
+	{name: "a musical beam format character", r: 0x1D173},
+	{name: "a language tag", r: 0xE0001},
+	{name: "a tag space", r: 0xE0020},
+	{name: "a supplementary variation selector", r: 0xE0100},
+}
 
 // Each case is one comment as the parser hands it over, markers included. The
 // check must refuse every waiver golangci-lint 2.13.2 honors that nolintlint
@@ -103,4 +138,155 @@ func TestGoWaiverFindings(t *testing.T) {
 		_, err := goWaiverFindings(dir, []string{"dir.go"})
 		assert.ErrorContains(t, err, "reading dir.go")
 	})
+	t.Run("an invisible reason on each waiver form, found where the file carries it", func(t *testing.T) {
+		dir := t.TempDir()
+		content := "package rt\n\nimport \"os\"\n\n// Write writes.\nfunc Write() error {\n" +
+			"\t_ = os.Remove(\"x\") //nolint:errcheck // \U0000200B\n" +
+			"\t// #nosec G306 -- \U000000AD\n" +
+			"\treturn os.WriteFile(\"x\", nil, 0o644)\n}\n\n" +
+			"// Read reads, with its reason on the line after the waiver.\nfunc Read() error {\n" +
+			"\t// #nosec G304 --\n\t// the path is the caller's own\n" +
+			"\t_, err := os.ReadFile(\"x\")\n\treturn err\n}\n\n" +
+			"// Remove removes the file, its waiver on the doc comment's second line.\n" +
+			"// #nosec G304 -- \U00002060\n" +
+			"func Remove() error {\n\treturn os.Remove(\"x\")\n}\n"
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "rt.go"), []byte(content), 0o600))
+		found, err := goWaiverFindings(dir, []string{"rt.go"})
+		require.NoError(t, err)
+		require.Len(t, found, 3, "findings: %q", found)
+		assert.Contains(t, found[2], fmt.Sprintf("rt.go:21 carries %q, whose reason is empty", "#nosec G304 -- "+string(rune(0x2060))+"\n"))
+		assert.Contains(t, found[0], `rt.go:7 carries "//nolint:errcheck // \u200b", whose reason is empty once its invisible code points are dropped`)
+		assert.Contains(t, found[1], `rt.go:8 carries "#nosec G306 -- \u00ad\n", whose reason is empty`)
+	})
+}
+
+func TestDefaultIgnorable(t *testing.T) {
+	tests := []struct {
+		name string
+		r    rune
+		want bool
+	}{
+		{name: "a letter", r: 'a'},
+		{name: "a space", r: ' '},
+		{name: "a no-break space, which is white space", r: 0x00A0},
+		{name: "an ogham space mark, which is white space", r: 0x1680},
+		{name: "an interlinear annotation anchor, which the property leaves out", r: 0xFFF9},
+		{name: "an Egyptian hieroglyph format character, which the property leaves out", r: 0x13430},
+		{name: "a prepended concatenation mark, which the property leaves out", r: 0x0600},
+	}
+	for _, point := range invisibleCodePoints {
+		tests = append(tests, struct {
+			name string
+			r    rune
+			want bool
+		}{name: point.name, r: point.r, want: true})
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, defaultIgnorable(tt.r), "U+%04X", tt.r)
+		})
+	}
+}
+
+// Each case is a reason as a waiver carries it, and the check must read it as
+// empty exactly when nothing visible is left once the default-ignorable code
+// points and the white space around them are gone.
+func TestInvisibleReason(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  bool
+	}{
+		{name: "a reason", input: " the close error is the write's"},
+		{name: "nothing", input: "", want: true},
+		{name: "spaces", input: " \t ", want: true},
+		{name: "a no-break space, which the linters trim too", input: " \U000000A0", want: true},
+		{name: "invisible code points around a visible one", input: "\U0000200Bx\U000000AD"},
+		{name: "a visible character alone", input: "-"},
+		{name: "several invisible code points", input: " \U0000200B\U0000200C\U00002060\U0000FEFF ", want: true},
+	}
+	for _, point := range invisibleCodePoints {
+		tests = append(tests, struct {
+			name  string
+			input string
+			want  bool
+		}{name: point.name + " alone", input: " " + string(point.r), want: true})
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, invisibleReason(tt.input))
+		})
+	}
+}
+
+// Each case is a comment as the parser hands it over, and waiverRefusal must
+// refuse a nolint whose reason is invisible, one case per code point, and pass
+// one whose reason reads.
+func TestWaiverRefusal_InvisibleReason(t *testing.T) {
+	tests := []struct {
+		name   string
+		text   string
+		wantIn string
+	}{
+		{name: "a reason that reads", text: "//nolint:errcheck // the close error is the write's"},
+		{name: "a reason with an invisible code point inside it", text: "//nolint:errcheck // the close\U0000200B error"},
+		{name: "a reason marker with nothing after it", text: "//nolint:errcheck //", wantIn: invisibleReasonWhy},
+		{name: "no reason marker, which nolintlint refuses itself", text: "//nolint:errcheck"},
+	}
+	for _, point := range invisibleCodePoints {
+		tests = append(tests, struct {
+			name   string
+			text   string
+			wantIn string
+		}{name: point.name, text: "//nolint:errcheck // " + string(point.r), wantIn: invisibleReasonWhy})
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := waiverRefusal(tt.text)
+			if tt.wantIn == "" {
+				assert.Empty(t, got)
+				return
+			}
+			assert.Equal(t, tt.wantIn, got)
+		})
+	}
+}
+
+// Each case is a comment group's text, markers dropped, as gosec reads it. The
+// check must refuse a #nosec whose reason after -- is invisible, one case per
+// code point, read through the extra dashes gosec trims and across the group's
+// lines, and pass one whose reason reads or that gives none.
+func TestNosecRefusal(t *testing.T) {
+	tests := []struct {
+		name   string
+		group  string
+		refuse bool
+	}{
+		{name: "a reason that reads", group: "#nosec G306 -- generated files are not secrets\n"},
+		{name: "a reason on the next line of the group", group: "#nosec G304 --\nthe path is the caller's own\n"},
+		{name: "no reason marker, which gosec refuses itself", group: "#nosec G306\n"},
+		{name: "no nosec at all", group: "the prose names -- and \U0000200B\n"},
+		{name: "a reason marker with nothing after it", group: "#nosec G306 --\n", refuse: true},
+		{name: "extra dashes before an invisible reason", group: "#nosec G306 --- \U0000200B\n", refuse: true},
+		{name: "a nosec after prose on its own line", group: "The path is fixed.\n#nosec G304 -- \U00002060\n", refuse: true},
+	}
+	for _, point := range invisibleCodePoints {
+		tests = append(tests, struct {
+			name   string
+			group  string
+			refuse bool
+		}{name: point.name, group: "#nosec G306 -- " + string(point.r) + "\n", refuse: true})
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, waiver := nosecRefusal(tt.group)
+			if !tt.refuse {
+				assert.Empty(t, got)
+				assert.Empty(t, waiver)
+				return
+			}
+			assert.Equal(t, invisibleReasonWhy, got)
+			assert.True(t, strings.HasPrefix(waiver, nosec), "the waiver opens at #nosec: %q", waiver)
+		})
+	}
 }

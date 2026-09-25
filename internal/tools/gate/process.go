@@ -50,17 +50,15 @@ var (
 	// withheldNames are the variables no program the gate starts inherits.
 	// SHELLCHECK_OPTS adds arguments to every ShellCheck run, actionlint's
 	// included, where an --exclude from the shell or a .env silences a finding.
-	// BUN_OPTIONS adds command-line flags to every Bun process, a --preload
-	// among them, which runs code before Prettier's first line, and
-	// BUN_INSPECT_PRELOAD runs a module in every Bun start. BUN_INSPECT and
-	// BUN_INSPECT_CONNECT_TO open Bun's inspector to a debugger.
+	// BUN_OPTIONS adds command-line flags to every Bun process, and an ordinary
+	// shell can set it.
 	// The token names are the ones gh, zizmor and mise read a GitHub token
 	// from: gh gets its own two back for `gh auth token` alone, and zizmor gets
 	// the token gh answers with. GH_HOST would point gh and zizmor at another
 	// host, and the two ZIZMOR_ names turn the online audits off whatever mode
 	// the zizmor row prints.
 	withheldNames = []string{
-		"SHELLCHECK_OPTS", "BUN_OPTIONS", "BUN_INSPECT_PRELOAD", "BUN_INSPECT", "BUN_INSPECT_CONNECT_TO",
+		"SHELLCHECK_OPTS", "BUN_OPTIONS",
 		"GH_TOKEN", "GITHUB_TOKEN", "GITHUB_API_TOKEN", "ZIZMOR_GITHUB_TOKEN",
 		"MISE_GITHUB_TOKEN", "MISE_GITHUB_ENTERPRISE_TOKEN",
 		"GH_HOST", "ZIZMOR_OFFLINE", "ZIZMOR_NO_ONLINE_AUDITS",

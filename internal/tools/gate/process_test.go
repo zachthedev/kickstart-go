@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -67,16 +68,19 @@ func TestCommandWithin(t *testing.T) {
 
 func TestInheritedEnvironment(t *testing.T) {
 	environ := []string{
-		"PATH=/bin", "SHELLCHECK_OPTS=--exclude=SC2086", "BUN_OPTIONS=--preload=./planted.ts",
-		"BUN_INSPECT_PRELOAD=./planted.ts", "Bun_Inspect_Preload=./planted.ts", "BUN_INSPECT=1", "BUN_INSPECT_CONNECT_TO=ws://127.0.0.1:1",
+		"PATH=/bin", "SHELLCHECK_OPTS=--exclude=SC2086", "BUN_OPTIONS=--preload=./planted.ts", "Bun_Options=--preload=./planted.ts",
+		"BUN_INSPECT_PRELOAD=./planted.ts", "BUN_INSPECT=1", "BUN_INSPECT_CONNECT_TO=ws://127.0.0.1:1",
 		"Gh_Token=fake", "GH_HOST=elsewhere.invalid", "KEEP=1",
 	}
+	// The BUN_INSPECT names pass: only someone already on the machine sets
+	// them, and the contributor leaves them unset.
+	inspect := []string{"BUN_INSPECT_PRELOAD=./planted.ts", "BUN_INSPECT=1", "BUN_INSPECT_CONNECT_TO=ws://127.0.0.1:1"}
 	tests := []struct {
 		goos string
 		want []string
 	}{
-		{goos: "windows", want: []string{"PATH=/bin", "KEEP=1"}},
-		{goos: "linux", want: []string{"PATH=/bin", "Bun_Inspect_Preload=./planted.ts", "Gh_Token=fake", "KEEP=1"}},
+		{goos: "windows", want: slices.Concat([]string{"PATH=/bin"}, inspect, []string{"KEEP=1"})},
+		{goos: "linux", want: slices.Concat([]string{"PATH=/bin", "Bun_Options=--preload=./planted.ts"}, inspect, []string{"Gh_Token=fake", "KEEP=1"})},
 	}
 	for _, tt := range tests {
 		t.Run(tt.goos, func(t *testing.T) {

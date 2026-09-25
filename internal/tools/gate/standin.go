@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -59,9 +58,12 @@ var shellCheckDirective = regexp.MustCompile(`(?i)#[\s\x{00a0}\x{2002}-\x{2009}\
 // expression blanked, which no regex over the workflow file sees through
 // escapes and folding. A line carrying a ShellCheck directive comes back as
 // an error finding in ShellCheck's JSON form, and ShellCheck does not run.
-// Otherwise ShellCheck runs over the same bytes without SHELLCHECK_OPTS, and
-// its output and exit code pass through. A failure of the stand-in's own
-// exits 2 with nothing on stdout, which actionlint reports as a failed run.
+// Otherwise ShellCheck runs over the same bytes without SHELLCHECK_OPTS, its
+// stderr and exit code pass through, and its stdout passes once it exited 0 or
+// 1, having read and checked the script. Any other exit keeps its stdout back,
+// since actionlint reads a failed run's `[]` as a clean one. A failure of the
+// stand-in's own exits 2 with nothing on stdout, which actionlint reports as a
+// failed run.
 func standIn(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		fmt.Fprintln(stderr, "gate: the ShellCheck stand-in needs the ShellCheck path")
@@ -81,23 +83,56 @@ func standIn(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 		_, _ = stdout.Write(data)
 		return 1
 	}
+	out, code, err := runShellCheck(ctx, args, script, stderr)
+	if err != nil {
+		fmt.Fprintf(stderr, "gate: running %s: %v\n", args[0], err)
+		return 2
+	}
+	if code != 0 && code != 1 {
+		fmt.Fprintf(stderr, "gate: %s exited %d, so its output is held back\n", args[0], code)
+		return code
+	}
+	_, _ = io.WriteString(stdout, out)
+	return code
+}
+
+// runShellCheck runs args, ShellCheck and its arguments, over script and
+// returns its stdout and exit code, with its stderr written to stderr. The
+// script is written on a goroutine of its own through a pipe the stand-in
+// holds, since os/exec drops the broken pipe a ShellCheck that exits before
+// reading its input leaves. A write that fails is an error: ShellCheck did not
+// read the whole script. A script the pipe buffers whole is written before
+// ShellCheck reads it, so only a longer one can show the failure.
+func runShellCheck(ctx context.Context, args []string, script []byte, stderr io.Writer) (string, int, error) {
 	cmd := exec.CommandContext(ctx, args[0], args[1:]...) // #nosec G204 G702 -- actionlint passes back the ShellCheck path the gate named in its -shellcheck value
-	cmd.Stdin = bytes.NewReader(script)
 	cmd.Env = inheritedEnvironment(os.Environ(), runtime.GOOS)
 	var out, errOut strings.Builder
 	cmd.Stdout, cmd.Stderr = &out, &errOut
 	cmd.WaitDelay = pipeGrace
-	err = cmd.Run()
+	input, err := cmd.StdinPipe()
+	if err != nil {
+		return "", 0, err
+	}
+	if err := cmd.Start(); err != nil {
+		return "", 0, err
+	}
+	written := make(chan error, 1)
+	go func() {
+		_, err := input.Write(script)
+		written <- errors.Join(err, input.Close())
+	}()
+	err = cmd.Wait()
 	_, _ = io.WriteString(stderr, errOut.String())
 	code := 0
 	if exit, ok := errors.AsType[*exec.ExitError](err); ok {
 		code = exit.ExitCode()
 	} else if err != nil {
-		fmt.Fprintf(stderr, "gate: running %s: %v\n", args[0], err)
-		return 2
+		return "", 0, err
 	}
-	_, _ = io.WriteString(stdout, out.String())
-	return code
+	if err := <-written; err != nil {
+		return "", 0, fmt.Errorf("ShellCheck did not read the whole script: %w", err)
+	}
+	return out.String(), code, nil
 }
 
 // directiveReports returns a finding for each line of script that carries a

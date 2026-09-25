@@ -62,9 +62,10 @@ func intactCheckout(t *testing.T) (string, string) {
 
 // TestRun_Pins drives the dispatch through the pins subcommand, which reads
 // the files from the working directory and asks git what it tracks there.
-// The env cases plant what a committed .env could set to hide itself, and each
-// case variant names a file a case-insensitive filesystem opens as the refused
-// one.
+// The env cases plant what a committed env file could set to hide itself, and
+// each case variant names a file a case-insensitive filesystem opens as the
+// refused one. A tracked env file at the root is the shared commits job's to
+// refuse, so the gate refuses the one below it.
 func TestRun_Pins(t *testing.T) {
 	dir, git := intactCheckout(t)
 	gitRun := func(args ...string) {
@@ -84,26 +85,29 @@ func TestRun_Pins(t *testing.T) {
 
 	t.Run("an intact checkout holds", func(t *testing.T) { pins(t, 0, "") })
 
-	require.NoError(t, os.WriteFile(filepath.Join(dir, autoloadedEnv), []byte("GIT_INDEX_FILE=.git/no-such-index\n"), 0o600))
+	nested := filepath.Join(dir, "docs", ".env")
+	require.NoError(t, os.MkdirAll(filepath.Dir(nested), 0o700))
+	require.NoError(t, os.WriteFile(nested, []byte("GIT_INDEX_FILE=.git/no-such-index\n"), 0o600))
 	t.Run("an untracked env file is the contributor's own", func(t *testing.T) { pins(t, 0, "") })
 
-	gitRun("add", "--force", autoloadedEnv)
-	t.Run("a tracked env file exits 1 and names it", func(t *testing.T) { pins(t, 1, `".env" is tracked`) })
+	gitRun("add", "--force", "docs/.env")
+	t.Run("a tracked env file below the root exits 1 and names it", func(t *testing.T) { pins(t, 1, `"docs/.env" is tracked`) })
 	t.Run("a tracked env file that sets GIT_INDEX_FILE still exits 1", func(t *testing.T) {
 		t.Setenv("GIT_INDEX_FILE", filepath.Join(dir, ".git", "no-such-index"))
-		pins(t, 1, `".env" is tracked`)
+		pins(t, 1, `"docs/.env" is tracked`)
 	})
-	gitRun("rm", "--cached", "--quiet", autoloadedEnv)
-	require.NoError(t, os.Remove(filepath.Join(dir, autoloadedEnv)))
+	gitRun("rm", "--cached", "--quiet", "docs/.env")
+	require.NoError(t, os.RemoveAll(filepath.Join(dir, "docs")))
 
-	upper := strings.ToUpper(autoloadedEnv)
-	require.NoError(t, os.WriteFile(filepath.Join(dir, upper), []byte("PROBE=1\n"), 0o600))
-	gitRun("add", "--force", upper)
-	t.Run("a tracked case variant of the env file exits 1 and names it", func(t *testing.T) {
-		pins(t, 1, `"`+upper+`" is tracked, and Taskfile.yml loads it as .env`)
+	upper := filepath.Join(dir, "docs", ".ENV.LOCAL")
+	require.NoError(t, os.MkdirAll(filepath.Dir(upper), 0o700))
+	require.NoError(t, os.WriteFile(upper, []byte("PROBE=1\n"), 0o600))
+	gitRun("add", "--force", "docs/.ENV.LOCAL")
+	t.Run("a tracked case variant of an env file exits 1 and names it", func(t *testing.T) {
+		pins(t, 1, `"docs/.ENV.LOCAL" is tracked, and Bun loads a file of that name`)
 	})
-	gitRun("rm", "--cached", "--quiet", upper)
-	require.NoError(t, os.Remove(filepath.Join(dir, upper)))
+	gitRun("rm", "--cached", "--quiet", "docs/.ENV.LOCAL")
+	require.NoError(t, os.RemoveAll(filepath.Join(dir, "docs")))
 
 	config := filepath.Join(dir, ".github", "ActionLint.YAML")
 	require.NoError(t, os.MkdirAll(filepath.Dir(config), 0o700))
@@ -136,9 +140,8 @@ func TestRun_Pins(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Dir(workflow), 0o700))
 	require.NoError(t, os.WriteFile(workflow, []byte("jobs: {} # zizmor: ignore[excessive-permissions]\n"), 0o600))
 	gitRun("add", "--force", ".github/workflows/ci.yaml")
-	t.Run("a workflow a row would skip exits 1 and names both reasons", func(t *testing.T) {
+	t.Run("a workflow a row would skip exits 1 and names it", func(t *testing.T) {
 		pins(t, 1, `".github/workflows/ci.yaml" is a workflow named .yaml`)
-		pins(t, 1, `".github/workflows/ci.yaml" carries an inline zizmor ignore comment`)
 	})
 	gitRun("rm", "--cached", "--quiet", ".github/workflows/ci.yaml")
 	require.NoError(t, os.RemoveAll(filepath.Join(dir, ".github")))
@@ -190,7 +193,13 @@ func TestRun_Walk(t *testing.T) {
 	t.Run("scripts prints what ShellCheck checked", func(t *testing.T) {
 		walkRow(t, []string{"scripts", shellcheck}, 0, "shellcheck checked 1 script file: scripts/build.sh", "")
 	})
+	t.Run("format refuses to start bunx before the install holds Prettier", func(t *testing.T) {
+		t.Setenv("PATH", fakeProgramDir(t, "bun"))
+		walkRow(t, []string{"format"}, 2, "", "gate format: prettier is not installed in this checkout: run bun install --frozen-lockfile")
+	})
 	t.Run("format prints how many files Prettier checked", func(t *testing.T) {
+		installPrettier(t, dir)
+		t.Cleanup(func() { require.NoError(t, os.RemoveAll(filepath.Join(dir, "node_modules"))) })
 		t.Setenv("PATH", fakeProgramDir(t, "bun"))
 		walkRow(t, []string{"format"}, 0, "prettier checked ", "")
 	})

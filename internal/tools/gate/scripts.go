@@ -39,10 +39,11 @@ type checkstyleReport struct {
 
 // scriptDirective is the one form a ShellCheck directive takes in a tracked
 // script, as its whole line: a disable naming each code, and the reason after
-// a second #. ShellCheck reads several keys in one directive and requires
-// neither a code nor a reason, so any other line shellCheckDirective matches
-// is refused.
-var scriptDirective = regexp.MustCompile(`^[ \t]*# shellcheck disable=SC[0-9]{4}(,SC[0-9]{4})* # \S.*$`)
+// a second #, which the one group captures. ShellCheck reads several keys in
+// one directive and requires neither a code nor a reason, so any other line
+// shellCheckDirective matches is refused, and so is a reason invisibleReason
+// reads as empty.
+var scriptDirective = regexp.MustCompile(`^[ \t]*# shellcheck disable=SC[0-9]{4}(?:,SC[0-9]{4})* # (\S.*)$`)
 
 // ///////////////////////////////////////////////
 // The row
@@ -118,9 +119,15 @@ func directiveFindings(root string, scripts []string) ([]string, error) {
 		}
 		for i, line := range strings.Split(string(data), "\n") {
 			line = strings.TrimSuffix(line, "\r")
-			if shellCheckDirective.MatchString(line) && !scriptDirective.MatchString(line) {
+			if !shellCheckDirective.MatchString(line) {
+				continue
+			}
+			switch form := scriptDirective.FindStringSubmatch(line); {
+			case form == nil:
 				found = append(found, fmt.Sprintf("%s:%d carries %q, and a ShellCheck directive in a script takes one form, as its whole line: # shellcheck disable=SCnnnn[,SCnnnn] # reason",
 					name, i+1, strings.TrimSpace(line)))
+			case invisibleReason(form[1]):
+				found = append(found, fmt.Sprintf("%s:%d carries %q, %s", name, i+1, strings.TrimSpace(line), invisibleReasonWhy))
 			}
 		}
 	}
