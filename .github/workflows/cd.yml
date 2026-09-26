@@ -37,7 +37,7 @@ jobs:
     if: github.event_name == 'push'
     # Every credential the called job uses is the app's, so the job token gets nothing.
     permissions: {}
-    uses: zachthedev/.github/.github/workflows/release-pr.yml@09a9a00aae657ea11e5d5979ef3ce5859d9aba3a # v0.2.0
+    uses: zachthedev/.github/.github/workflows/release-pr.yml@ec458567a7200c4ad96ed0c7556e06bc2b287738 # v0.3.0
     secrets: inherit
 
   # The release binaries, built by the gate's release task at the tagged commit. The push
@@ -92,7 +92,7 @@ jobs:
       id-token: write
       # Recording the attestation.
       attestations: write
-    uses: zachthedev/.github/.github/workflows/publish.yml@09a9a00aae657ea11e5d5979ef3ce5859d9aba3a # v0.2.0
+    uses: zachthedev/.github/.github/workflows/publish.yml@ec458567a7200c4ad96ed0c7556e06bc2b287738 # v0.3.0
     with:
       tag: ${{ needs.release-pr.outputs.tag || inputs.tag }}
       artifacts: release
