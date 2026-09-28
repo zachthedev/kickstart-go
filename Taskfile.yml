@@ -159,7 +159,7 @@ tasks:
   # Prettier owns every file Go does not: YAML, JSON, Markdown. The gate
   # starts it through `bun x --bun --no-install` under the pinned Bun, and
   # first refuses a checkout whose node_modules/.bin holds no Prettier, where
-  # bunx would run a copy from a parent directory, PATH or its cache. It names
+  # `bun x` would run a copy from a parent directory, PATH or its cache. It names
   # .prettierrc and .prettierignore and turns .editorconfig off, so Prettier
   # searches for no config of its own, and .gitignore narrows nothing. Prettier
   # exits 0 over a tree where it matched nothing, so the gate counts the files

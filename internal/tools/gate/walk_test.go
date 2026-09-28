@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// prettierArgs is the command line the format row hands bun: bunx under the
+// prettierArgs is the command line the format row hands bun: `bun x` under the
 // pinned Bun, then Prettier's own arguments.
 var prettierArgs = []string{
 	"x", "--bun", "--no-install", "prettier", "--check", "--debug-check",
@@ -251,9 +251,9 @@ func TestFormatFindings(t *testing.T) {
 		_, err := formatFindings(run, "bun-path", root)
 		assert.ErrorContains(t, err, "running bun-path")
 	})
-	t.Run("Prettier not installed, so bunx never starts", func(t *testing.T) {
+	t.Run("Prettier not installed, so bun x never starts", func(t *testing.T) {
 		run := func(string, []string, ...string) (output, error) {
-			t.Fatal("bunx must not start before the install holds Prettier")
+			t.Fatal("bun x must not start before the install holds Prettier")
 			return output{}, nil
 		}
 		_, err := formatFindings(run, "bun-path", t.TempDir())

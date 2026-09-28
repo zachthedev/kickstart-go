@@ -34,7 +34,7 @@ installs the mise tools from the lockfile. Before you install a branch you did n
 
 Run `bun install --frozen-lockfile` again after every pull, after every branch switch and in every new worktree,
 before you run the gate or commit. The format row and the commit hook start Prettier and commitlint through
-`bunx --bun --no-install`, which runs the copy this checkout's `node_modules/.bin` holds. The format row refuses
+`bun x --bun --no-install`, which runs the copy this checkout's `node_modules/.bin` holds. The format row refuses
 to start while that copy is missing. The hook does not check, and a missing or stale copy there runs another one
 ([Troubleshooting](#troubleshooting)). `package.json` carries no install script, so
 `bun install --frozen-lockfile --ignore-scripts`, the form the gate's message names for a worktree, installs the
@@ -76,13 +76,13 @@ Read the diff before you commit on the branch too, since the commit hook runs th
 
 What reaches the tools from your own environment:
 
-- `BUN_OPTIONS` hands its flags to every direct Bun start. The ones this repository makes, `bun install` and
-  `bun run audit`, run no module from a `--preload` in it. The gate withholds it from the processes it starts, and
-  a tool started through `bunx --bun --no-install` does not read it. Leave it unset.
+- `BUN_OPTIONS` hands its flags to every direct Bun start. The ones this repository makes are `bun install` and
+  `bun run audit`, and neither runs a module from a `--preload` in it. A tool started through `bun x` does not read
+  it. Neither Prettier nor commitlint starts a Bun process of its own that would. Leave it unset.
 - `BUN_INSPECT`, `BUN_INSPECT_CONNECT_TO` and `BUN_INSPECT_PRELOAD`. Leave all three unset. The gate passes them
   to the programs it starts. Bun reads them in a direct start, where `BUN_INSPECT_PRELOAD` runs a module and the
-  other two open its inspector. A tool started through `bunx --bun --no-install` ran no such preload.
-- A personal env file. `bunx` ignores `--no-env-file`, so Prettier and commitlint load an untracked `.env`,
+  other two open its inspector. Prettier and commitlint, started through `bun x`, ran no such preload.
+- A personal env file. `bun x` ignores `--no-env-file`, so Prettier and commitlint load an untracked `.env`,
   `.env.local` or another name Bun loads from the root. `Taskfile.yml` loads `.env` into every task.
   [Troubleshooting](#troubleshooting) says what that can change.
 
@@ -305,7 +305,7 @@ a row reads gets `NO_COLOR=1`, and the row strips terminal escape sequences from
 a line, since some tools color their output on a CI runner and print it plain locally. A finding quotes the text
 it names from a file, so no control character in it reaches the terminal.
 
-The format row starts Prettier through `bunx --bun --no-install`, under the Bun `PATH` names. It first refuses a
+The format row starts Prettier through `bun x --bun --no-install`, under the Bun `PATH` names. It first refuses a
 checkout whose `node_modules/.bin` holds no Prettier that resolves, through every link, to a regular file, and
 names the install to run.
 
@@ -586,13 +586,13 @@ A local run that fails or disagrees with CI:
   the install to run. A stale one runs the version it holds, which can disagree with the one `bun.lock` pins, and
   CI installs frozen before its gate. Run `bun install --frozen-lockfile` after every pull, after every branch
   switch and in every worktree ([Setup](#setup)).
-- The other copy `bunx` may run. With no copy in this checkout's `node_modules/.bin`, the commit hook's `bunx`
+- The other copy `bun x` may run. With no copy in this checkout's `node_modules/.bin`, the commit hook's `bun x`
   runs commitlint from a parent directory's `node_modules/.bin`, from `PATH` or from its own cache, none of them the
   version `bun.lock` pins. The hook does not check. Install, and the hook runs the pinned copy again.
 - A package `bun.lock` no longer names. `bun install --frozen-lockfile` does not prune it, so a stale
   `node_modules/` keeps a package CI never installs. After a dependency removal, delete `node_modules/` and install
   again.
-- An env file. `bunx` ignores `--no-env-file`, so an untracked `.env`, `.env.local` or another name Bun loads from
+- An env file. `bun x` ignores `--no-env-file`, so an untracked `.env`, `.env.local` or another name Bun loads from
   the root reaches Prettier and commitlint, and a variable there can change their results. `Taskfile.yml` loads
   `.env` into every task as well. CI has none of them. Move the file aside to run what CI runs
   ([Safety](#safety)).

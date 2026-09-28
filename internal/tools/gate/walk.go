@@ -64,7 +64,7 @@ const (
 	// before .yml or .yaml.
 	actionFile = "action"
 	// installedBin is where bun install puts each package's command, the one
-	// bunx runs.
+	// `bun x` runs.
 	installedBin = "node_modules/.bin"
 )
 
@@ -157,8 +157,8 @@ func tomlFindings(run commandRunner, taplo, root string, tracked []string) (rowR
 }
 
 // formatFindings runs Prettier's check over the tree and counts the files it
-// reports checking. Prettier starts through `bun x --bun --no-install`, bunx
-// under the pinned Bun, which runs the command the install put in
+// reports checking. Prettier starts through `bun x --bun --no-install` under
+// the pinned Bun, which runs the command the install put in
 // node_modules/.bin under Bun rather than a node on PATH, and fetches nothing.
 // --debug-check makes Prettier name each file it formats, and --check beside it
 // still fails a file whose formatting differs. Prettier exits 0 over a tree
@@ -197,10 +197,10 @@ func formatFindings(run commandRunner, bun, root string) (rowResult, error) {
 	return result, nil
 }
 
-// installedTool refuses a bunx start of tool unless the command the install
+// installedTool refuses a `bun x` start of tool unless the command the install
 // writes for it resolves, through every link, to a regular file: tool.exe on
 // Windows, and tool elsewhere, where the install writes a link. Without one,
-// bunx runs a copy from a parent directory's node_modules/.bin, from PATH or
+// `bun x` runs a copy from a parent directory's node_modules/.bin, from PATH or
 // from its own cache, none of them the version bun.lock pins. A link a removed
 // package left behind points at nothing.
 func installedTool(root, tool, goos string) error {

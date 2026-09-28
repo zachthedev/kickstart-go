@@ -214,7 +214,7 @@ func TestRun_Walk(t *testing.T) {
 	t.Run("scripts prints what ShellCheck checked", func(t *testing.T) {
 		walkRow(t, []string{"scripts", shellcheck}, 0, "shellcheck checked 1 script file: scripts/build.sh", "")
 	})
-	t.Run("format refuses to start bunx before the install holds Prettier", func(t *testing.T) {
+	t.Run("format refuses to start bun x before the install holds Prettier", func(t *testing.T) {
 		t.Setenv("PATH", fakeProgramDir(t, "bun"))
 		walkRow(t, []string{"format"}, 2, "", "gate format: prettier is not installed in this checkout: run bun install --frozen-lockfile")
 	})
