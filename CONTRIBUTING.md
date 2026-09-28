@@ -394,7 +394,9 @@ refuses:
   both match.
 - A composite action, an `action.yml` or `action.yaml` in any case, anywhere but under `.github/actions/` in that
   spelling. A workflow's `uses: ./<path>` runs an action from any path, and zizmor reads `.github` alone, so an
-  action elsewhere, `.GitHub` or an 8.3 short name such as `GITHUB~1` included, runs with no audit.
+  action elsewhere, `.GitHub` or an 8.3 short name such as `GITHUB~1` included, runs with no audit. Under
+  `.github/actions/`, the name passes in exact spelling alone. zizmor collects `action.yml` and `action.yaml`, and a
+  case-insensitive runner opens an `ACTION.YML` that zizmor never reads.
 - A `replace`, `godebug` or `ignore` line in `go.mod`. An `ignore` line takes its directories out of every `./...`
   row.
 

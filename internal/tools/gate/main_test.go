@@ -167,6 +167,29 @@ func TestRun_Pins(t *testing.T) {
 	gitRun("rm", "--cached", "--quiet", "tools/x/action.yml")
 	require.NoError(t, os.RemoveAll(filepath.Join(dir, "tools")))
 
+	for _, tt := range []struct {
+		name, path, wantIn string
+		wantCode           int
+	}{
+		{name: "a composite action under .github/actions in exact spelling holds", path: ".github/actions/ok/action.yml"},
+		{
+			name: "an action named ACTION.YML under .github/actions exits 1 and names the spelling to take", path: ".github/actions/upper/ACTION.YML", wantCode: 1,
+			wantIn: `".github/actions/upper/ACTION.YML" names a composite action in another case than action.yml, and zizmor, which collects that spelling alone, never audits it while a case-insensitive runner opens it for uses: ./. Rename it action.yml`,
+		},
+		{
+			name: "an action named Action.Yaml under .github/actions exits 1 and names the spelling to take", path: ".github/actions/mixed/Action.Yaml", wantCode: 1,
+			wantIn: `".github/actions/mixed/Action.Yaml" names a composite action in another case than action.yaml, and zizmor, which collects that spelling alone, never audits it while a case-insensitive runner opens it for uses: ./. Rename it action.yaml`,
+		},
+	} {
+		planted := filepath.Join(dir, filepath.FromSlash(tt.path))
+		require.NoError(t, os.MkdirAll(filepath.Dir(planted), 0o700))
+		require.NoError(t, os.WriteFile(planted, []byte("runs:\n  using: composite\n  steps: []\n"), 0o600))
+		gitRun("add", "--force", tt.path)
+		t.Run(tt.name, func(t *testing.T) { pins(t, tt.wantCode, tt.wantIn) })
+		gitRun("rm", "--cached", "--quiet", tt.path)
+		require.NoError(t, os.RemoveAll(filepath.Join(dir, ".github")))
+	}
+
 	tampered := []byte(intactLock()[:len(intactLock())-1])
 	require.NoError(t, os.WriteFile(filepath.Join(dir, lockPath), bytes.ReplaceAll(tampered, []byte("github-attestations"), []byte("none")), 0o600))
 	t.Run("a finding exits 1 and prints it", func(t *testing.T) { pins(t, 1, "attests its releases") })

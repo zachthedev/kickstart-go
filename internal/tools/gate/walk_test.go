@@ -556,10 +556,12 @@ func TestCountFiles(t *testing.T) {
 }
 
 // Each case hands the check tracked paths, and the check must refuse a
-// workflow whose extension is not a lowercase .yml and a composite action
-// anywhere but under .github/actions in that spelling, and let every other
-// path pass. An inline zizmor waiver under .github is the shared workflows
-// job's to refuse, and a path under a version control directory is review's.
+// workflow whose extension is not a lowercase .yml, a composite action
+// anywhere but under .github/actions in that spelling, and one under it named
+// in another case than action.yml or action.yaml, naming the spelling to
+// take, and let every other path pass. An inline zizmor waiver under .github
+// is the shared workflows job's to refuse, and a path under a version control
+// directory is review's.
 func TestWalkedFindings(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -582,6 +584,14 @@ func TestWalkedFindings(t *testing.T) {
 		{name: "a composite action at the root", tracked: []string{"action.yml"}, wantIn: []string{`"action.yml" is a composite action`}},
 		{name: "action metadata named in capitals", tracked: []string{"ci/x/Action.YAML"}, wantIn: []string{`"ci/x/Action.YAML" is a composite action`}},
 		{name: "a workflow file named action.yml", tracked: []string{".github/workflows/action.yml"}, wantIn: []string{`".github/workflows/action.yml" is a composite action`}},
+		{name: "a composite action nested below .github/actions", tracked: []string{".github/actions/deep/sub/action.yml"}},
+		{name: "action metadata under .github/actions named in capitals", tracked: []string{".github/actions/upper/ACTION.YML"}, wantIn: []string{
+			`".github/actions/upper/ACTION.YML" names a composite action in another case than action.yml, and zizmor, which collects that spelling alone, never audits it while a case-insensitive runner opens it for uses: ./. Rename it action.yml`,
+		}},
+		{name: "an action.yaml under .github/actions in mixed case", tracked: []string{".github/actions/mixed/Action.Yaml"}, wantIn: []string{
+			`".github/actions/mixed/Action.Yaml" names a composite action in another case than action.yaml, and zizmor, which collects that spelling alone, never audits it while a case-insensitive runner opens it for uses: ./. Rename it action.yaml`,
+		}},
+		{name: "action metadata in capitals under .GitHub is refused as outside alone", tracked: []string{".GitHub/actions/x/ACTION.YML"}, wantIn: []string{`".GitHub/actions/x/ACTION.YML" is a composite action outside .github/actions/`}},
 		{name: "a name that only starts like action metadata", tracked: []string{"docs/action.yml.md", "tools/actions.yml"}},
 		{name: "an inline zizmor waiver under .github, which the workflows job refuses", tracked: []string{".github/workflows/cd.yml", zizmorConfig}},
 	}
