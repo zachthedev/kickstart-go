@@ -18,11 +18,11 @@ Read these before changing anything, in order. They bind an agent as they bind a
 
 <!-- TODO(kickstart): keep these four lines as they are unless the clone renames a task. -->
 
-- `go tool task check` is the gate.
-- `go tool task check:quick` is the gate without the race detector and the coverage run, which is what the
-  push hook runs.
-- `go tool task --list` lists every task with what it checks.
-- `go tool task <task>` runs one of them.
+- `go tool task check` is the gate: every row, the race detector's test run and the coverage run included.
+- `go tool task check:quick` runs every row but those two test runs, `test` and `coverage`. The push hook runs it
+  after `scripts/go-mod-check.sh` and `go run ./internal/tools/gate pins`.
+- `go tool task --list` prints each task that has a description, with what it checks.
+- `go tool task <task>...` runs the named tasks, one after another.
 
 [CONTRIBUTING.md#the-gate](CONTRIBUTING.md#the-gate) says what the rows cover.
 
