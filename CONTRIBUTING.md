@@ -533,19 +533,28 @@ in the gate on every push and pull request rather than on a clock.
 
 ### Tool integrity
 
-Each tool the gate runs, and how its bytes are held to their source. Four tiers: provenance, a checksum in a pinned
-tree, a checksum recorded by a third party, a version alone.
+Each tool this repository pins, and who vouches for its bytes. The publisher's build attestation is a statement a
+workflow in the publisher's repository signed over the artifact's digest. The publisher's signature is made with a
+key the checking tool carries. The registry's record is a hash, or a signature, from a registry that never replaces
+a published version. The release's own checksum is GitHub's digest for the asset, or a checksum file beside it, in
+a release that can still change. A hash this repository computed comes from one download, and nothing outside the
+lockfile records it. A version alone names a release, and nothing recorded before the install vouches for its
+bytes. Setup names the programs you install yourself, and none of them takes a tier.
 
-- actionlint and zizmor: provenance. `mise.lock` records `github-attestations`, mise verifies the attestation on
-  every install, and the gate refuses a lockfile that drops the line.
-- ShellCheck and taplo: a checksum in a pinned tree, `mise.lock`. taplo's checksums are the sha256 of its release
-  artifacts, computed once from a download, as `mise.toml` records.
-- golangci-lint, govulncheck, task, lefthook, go-test-coverage, testpair and deadcode: a checksum in a pinned tree,
-  `go.sum`, checked against the checksum database on every build.
-- Prettier, commitlint and `yaml`: a checksum in a pinned tree, `bun.lock`.
-- Go and Bun themselves: a version alone. The pin file plus the cooldown is the control, because the setup actions
-  verify no download.
-- mise itself: a publisher signature, which `jdx/mise-action` checks against the release's signed checksums.
+- actionlint and zizmor: the publisher's build attestation, in `mise.lock`. The lockfile records
+  `github-attestations`, mise checks the attestation on every install, and the gate refuses a lockfile that drops
+  the line.
+- mise itself, in CI: the publisher's signature, on `jdx/mise-action`'s `version:` line in `ci.yml`. The action
+  checks the release's signed checksums.
+- golangci-lint, govulncheck, task, lefthook, go-test-coverage, testpair and deadcode: the registry's record, in
+  `go.sum`, from Go's checksum database. Every build checks `go.sum` against the module cache, and the database
+  answers only for a hash `go.sum` lacks.
+- Prettier, commitlint and `yaml`: the registry's record, in `bun.lock`.
+- ShellCheck: the release's own checksum, in `mise.lock`.
+- taplo: a hash this repository computed, in `mise.lock`. Its checksums are the sha256 of its release artifacts,
+  computed once from a download, as `mise.toml` records.
+- Go and Bun themselves: a version alone, in `go.mod` and in `package.json`'s `packageManager`. The pin plus the
+  cooldown is the control, because the setup actions check no download.
 
 For every mise tool, `internal/tools/gate/pins.go` holds the pin and the lockfile's version to the tool's release
 shape, `major.minor.patch` in ASCII digits, before it builds any url from them. It holds each lockfile `url`, byte
