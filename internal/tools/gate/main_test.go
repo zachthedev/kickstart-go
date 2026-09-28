@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -37,6 +38,27 @@ func TestRun_Usage(t *testing.T) {
 			assert.Equal(t, 2, got)
 			assert.Contains(t, stderr.String(), tt.wantIn)
 			assert.Empty(t, stdout.String())
+		})
+	}
+}
+
+// TestRun_Tests drives the dispatch through the tests row, which must hold a
+// run to the skip count the platform the gate runs on declares.
+func TestRun_Tests(t *testing.T) {
+	declared := declaredSkips[runtime.GOOS]
+	tests := []struct {
+		name     string
+		skipped  int
+		wantCode int
+	}{
+		{name: "this platform's declared count passes", skipped: declared, wantCode: 0},
+		{name: "one skip past it fails", skipped: declared + 1, wantCode: 1},
+		{name: "one skip short of it fails", skipped: max(declared-1, 0), wantCode: min(declared, 1)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			assert.Equal(t, tt.wantCode, run(t.Context(), []string{"tests"}, strings.NewReader(skips(tt.skipped)), &stdout, &stderr), "stderr: %s", stderr.String())
 		})
 	}
 }

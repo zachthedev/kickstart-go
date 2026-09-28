@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -20,7 +22,8 @@ func event(action, pkg, test, out string) string {
 
 // Each case is one stream of go test -json events, and the row must fail
 // when no test ran, when every test it ran skipped, when one failed, and when
-// a package failed or did not build, and pass a run where a test passed.
+// a package failed or did not build, and pass a run where a test passed. A
+// case runs as freebsd, which declares no skip, unless it names a platform.
 func TestTestsRow(t *testing.T) {
 	passing := event("run", "ex/a", "TestA", "") +
 		event("output", "ex/a", "TestA", "=== RUN   TestA\n") +
@@ -30,6 +33,7 @@ func TestTestsRow(t *testing.T) {
 		event("pass", "ex/a", "", "")
 	tests := []struct {
 		name       string
+		goos       string
 		stream     string
 		wantCode   int
 		wantStdout []string
@@ -41,10 +45,11 @@ func TestTestsRow(t *testing.T) {
 			wantStdout: []string{"ok  \tex/a\t0.1s\n", "go test ran 1 test in 1 package: 1 passed, 0 skipped, 0 failed"},
 		},
 		{
-			name: "some skipped, one passed",
+			name: "some skipped as the platform declares, the rest passed", goos: "windows",
 			stream: passing +
-				event("skip", "ex/b", "TestB", "") + event("pass", "ex/b", "TestC/sub", "") + event("pass", "ex/b", "TestC", "") + event("pass", "ex/b", "", ""),
-			wantStdout: []string{"go test ran 4 tests in 2 packages: 3 passed, 1 skipped, 0 failed"},
+				event("skip", "ex/b", "TestB", "") + event("skip", "ex/b", "TestD", "") + event("skip", "ex/b", "TestE", "") +
+				event("pass", "ex/b", "TestC/sub", "") + event("pass", "ex/b", "TestC", "") + event("pass", "ex/b", "", ""),
+			wantStdout: []string{"go test ran 6 tests in 2 packages: 3 passed, 3 skipped, 0 failed"},
 		},
 		{
 			name: "every test skipped, as -short or a GOFLAGS -run can make it",
@@ -91,7 +96,11 @@ func TestTestsRow(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
-			code := testsRow(strings.NewReader(tt.stream), &stdout, &stderr)
+			goos := tt.goos
+			if goos == "" {
+				goos = "freebsd"
+			}
+			code := testsRow(strings.NewReader(tt.stream), goos, &stdout, &stderr)
 			assert.Equal(t, tt.wantCode, code, "stdout: %s\nstderr: %s", stdout.String(), stderr.String())
 			for _, want := range tt.wantStdout {
 				assert.Contains(t, stdout.String(), want)
@@ -102,4 +111,78 @@ func TestTestsRow(t *testing.T) {
 			assert.NotContains(t, stdout.String(), "=== RUN", "the framing -json adds stays out")
 		})
 	}
+}
+
+// skips is a run of package ex/s where one test passed and n were skipped,
+// TestS0 onward.
+func skips(n int) string {
+	var b strings.Builder
+	b.WriteString(event("pass", "ex/s", "TestPass", ""))
+	for i := range n {
+		b.WriteString(event("skip", "ex/s", fmt.Sprintf("TestS%d", i), ""))
+	}
+	b.WriteString(event("pass", "ex/s", "", ""))
+	return b.String()
+}
+
+// Each case is a run on one platform that skipped some tests, and the row
+// must pass at the count that platform declares and fail one skip past it or
+// one short of it, naming what skipped. A platform the map does not name
+// declares none.
+func TestTestsRow_DeclaredSkips(t *testing.T) {
+	type platform struct {
+		goos     string
+		declared int
+	}
+	platforms := []platform{{"linux", declaredSkips["linux"]}, {"darwin", declaredSkips["darwin"]}, {"windows", declaredSkips["windows"]}, {"freebsd", 0}}
+	for _, p := range platforms {
+		t.Run(p.goos+" at its declared count", func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			assert.Equal(t, 0, testsRow(strings.NewReader(skips(p.declared)), p.goos, &stdout, &stderr), "stderr: %s", stderr.String())
+			assert.Contains(t, stdout.String(), fmt.Sprintf("1 passed, %d skipped, 0 failed", p.declared))
+		})
+		t.Run(p.goos+" one skip past its declared count", func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			assert.Equal(t, 1, testsRow(strings.NewReader(skips(p.declared+1)), p.goos, &stdout, &stderr))
+			want := fmt.Sprintf("go test skipped %d %s, and the gate declares %d on %s, so a test that should run did not: ",
+				p.declared+1, plural(p.declared+1, "test", "tests"), p.declared, p.goos)
+			assert.Contains(t, stderr.String(), want)
+			assert.Contains(t, stderr.String(), fmt.Sprintf(`"ex/s TestS%d"`, p.declared))
+			assert.Empty(t, stdout.String())
+		})
+		if p.declared == 0 {
+			continue
+		}
+		t.Run(p.goos+" one skip short of its declared count", func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			assert.Equal(t, 1, testsRow(strings.NewReader(skips(p.declared-1)), p.goos, &stdout, &stderr))
+			want := fmt.Sprintf("go test skipped %d %s, and the gate declares %d on %s, so a skip it declares no longer happens and the count in declaredSkips is stale. Skipped: ",
+				p.declared-1, plural(p.declared-1, "test", "tests"), p.declared, p.goos)
+			assert.Contains(t, stderr.String(), want)
+			assert.Empty(t, stdout.String())
+		})
+	}
+	t.Run("the platforms CI runs each declare a skip", func(t *testing.T) {
+		for _, goos := range []string{"linux", "darwin", "windows"} {
+			assert.Positive(t, declaredSkips[goos], "%s declares its skips", goos)
+		}
+	})
+	t.Run("a stale count with nothing skipped says so", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		assert.Equal(t, 1, testsRow(strings.NewReader(skips(0)), "windows", &stdout, &stderr))
+		assert.Contains(t, stderr.String(), "is stale. Skipped: none")
+	})
+	t.Run("a long list names the first skipped tests and counts the rest", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		assert.Equal(t, 1, testsRow(strings.NewReader(skips(skippedShown+2)), "freebsd", &stdout, &stderr))
+		assert.Contains(t, stderr.String(), `"ex/s TestS0", "ex/s TestS1"`)
+		assert.Contains(t, stderr.String(), fmt.Sprintf(`"ex/s TestS%d" and 2 more`, skippedShown-1))
+		assert.NotContains(t, stderr.String(), fmt.Sprintf(`"ex/s TestS%d"`, skippedShown))
+	})
+	t.Run("a subtest's name reaches the finding quoted", func(t *testing.T) {
+		stream := event("pass", "ex/s", "TestPass", "") + event("skip", "ex/s", "TestRun/a\"quoted\"_name", "") + event("pass", "ex/s", "", "")
+		var stdout, stderr bytes.Buffer
+		assert.Equal(t, 1, testsRow(strings.NewReader(stream), "freebsd", &stdout, &stderr))
+		assert.Contains(t, stderr.String(), strconv.Quote(`ex/s TestRun/a"quoted"_name`))
+	})
 }

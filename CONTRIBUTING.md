@@ -15,6 +15,8 @@ The machine needs:
 - [git](https://git-scm.com) 2.41 or newer. The absorbed command `MARKERS.md` prints passes `--attr-source`, which
   older git refuses, and the test that runs that command skips on an older git and says why.
 - A C compiler on `PATH`, for the race detector. Without one the race row prints that it did not run.
+- On Windows, the right to create a symbolic link, which Developer Mode grants. Several tests make one, and without
+  it they skip past what the test rows declare ([Troubleshooting](#troubleshooting)).
 - [gh](https://cli.github.com), optional. When `gh auth token` answers within five seconds, the gate runs zizmor
   online; otherwise zizmor runs offline and no token is needed.
 
@@ -330,7 +332,11 @@ alone, so the workflows row refuses a `shell:` value other than `bash`, `sh` or 
 
 Every test row pipes `go test -json` through `go run ./internal/tools/gate tests`, which fails unless a test ran and
 passed and none failed. go test exits 0 when a `-run`, `-skip` or `-short` in a `GOFLAGS` the shell exports skips
-every test, and when no test matched, so its exit code alone proves nothing.
+every test, and when no test matched, so its exit code alone proves nothing. The row also fails when the number of
+skipped tests differs from what `declaredSkips` in `internal/tools/gate/tests.go` declares for the platform, and
+names the tests that skipped. A skip past the count is a test that did not run, and a count short of it is a
+declaration to lower. The counts cover the cases for a behavior another platform alone has, and the cases that step
+aside where CI's runner keeps `gh` beside `git`.
 
 The gate sets no deadline of its own on a row. CI's gate job carries `timeout-minutes: 30`, and locally Ctrl-C ends
 a hung tool. `gh auth token` alone runs under five seconds, past which the zizmor row runs offline. A program that
@@ -603,6 +609,10 @@ A local run that fails or disagrees with CI:
   file as the real name, and git warns of the collision as it checks out. The Windows run then reads a file the
   diff names elsewhere. CI's Linux legs and the shared jobs read the real files, so read the diff for such a pair.
 - A race row that prints that it did not run. The machine has no C compiler on `PATH` ([Setup](#setup)).
+- A test row that fails on a skip count other than the one declared. A test skips where the machine cannot run it:
+  with no `git` or `sh` on `PATH`, or on Windows without the right to create a symbolic link ([Setup](#setup)). A
+  few cases step aside only where `gh`, `go` or `mise` sits in `git`'s directory, as on CI's Linux and macOS runners,
+  so a machine laid out otherwise skips fewer. The finding names each test that skipped.
 
 ## What never happens
 
