@@ -12,14 +12,16 @@ on:
 
 permissions: {}
 
-# The four mise pins, for the mise commands jdx/mise-action runs itself: mise.toml is the one config
-# file, with no .tool-versions, no environment layer and no per-platform layer. The gate's own mise
-# commands build their environment from an allow-list and set these again.
+# The four mise pins and the url_replacements rule, for the mise commands jdx/mise-action runs
+# itself: mise.toml is the one config file, with no .tool-versions, no environment layer and no
+# per-platform layer, and mise's url_api fallback goes to a host that does not resolve. The gate's
+# own mise commands build their environment from an allow-list and set these again.
 env:
   MISE_OVERRIDE_CONFIG_FILENAMES: mise.toml
   MISE_OVERRIDE_TOOL_VERSIONS_FILENAMES: none
   MISE_ENV: ''
   MISE_AUTO_ENV: 'false'
+  MISE_URL_REPLACEMENTS: '{"regex:^https://api\\.github\\.com/repos/[^/]+/[^/]+/releases/assets/.*$":"https://url-api-refused.invalid/"}'
 
 # A pull request's newer push cancels its older run. A push to main keys its group by commit,
 # because GitHub keeps one pending run per group and cancels the older one, so a burst of pushes
