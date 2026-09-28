@@ -72,8 +72,9 @@ script. Some of the branch's code runs before any check does:
   in the root `package.json` or a root `package.yaml`, whatever config commitlint names. An `$import` there runs a
   module in the commit hook. The shared `commits` job refuses all three and the gate refuses the `.config`, each
   after the fact.
-- The hook scripts lefthook writes start `go tool lefthook` itself, and that build reads a branch's `go.work`
-  before any job's `GOWORK=off` applies.
+- The hook scripts lefthook writes try, in order, `LEFTHOOK_BIN`, a `lefthook` on `PATH`, the binary in Go's build
+  cache that ran `go tool lefthook install`, a copy under `node_modules`, `go tool lefthook`, then other package
+  managers' runners. The `go tool` build reads a branch's `go.work` before any job's `GOWORK=off` applies.
 
 The shared jobs refuse such a branch before it merges, and nothing stops its first run on your machine but the diff
 read.
@@ -86,7 +87,8 @@ What reaches the tools from your own environment:
   Bun children of its own. A tool that does, such as wrangler or vitest, passes `BUN_OPTIONS` and
   `BUN_INSPECT_PRELOAD` on to them, and a repository that runs one names it here. Leave it unset.
 - `BUN_INSPECT`, `BUN_INSPECT_CONNECT_TO` and `BUN_INSPECT_PRELOAD`. Leave them unset too. The last runs a module in
-  every direct Bun start, and nothing in the hooks or the gate clears them.
+  a Bun start such as `bun -e`. It runs none in `bun install`, `bun run audit` or the `bun x` starts here, and
+  nothing in the hooks or the gate clears them.
 - A personal env file. `bun x` ignores `--no-env-file`, so an untracked `.env` reaches Prettier and commitlint, the
   JavaScript tools the format row and the commit hook start, and can change what one reports. `Taskfile.yml` loads
   `.env` into every task too ([Troubleshooting](#troubleshooting)).
@@ -96,7 +98,10 @@ What reaches the tools from your own environment:
 The hooks are no control:
 
 - A hook runs in your own environment and clears nothing from it.
-- A fresh clone runs no hook until `go tool lefthook install` runs.
+- The hooks fail open. The hook script `go tool lefthook install` writes prints `Can't find lefthook in PATH` and
+  exits 0 when it finds no lefthook binary, as when `go` is not on `PATH` and Go's build cache no longer holds the
+  binary that ran `install`, and the commit or push goes through unchecked. A fresh clone runs no hook until
+  `go tool lefthook install` runs.
 - They catch an accident, never a hostile branch. lefthook merges a branch's `lefthook-local.*` or
   `.config/lefthook-local.*` over `lefthook.yml`, and a job there with a hook job's name replaces it.
 
@@ -361,9 +366,10 @@ token, and that job is the one CI job that holds it, so CI's gate job runs zizmo
 online when `gh auth token` answers, and its summary says which mode ran.
 
 The shared `commits` and `workflows` jobs refuse, before a merge, the files that run code in Bun, bun install or
-commitlint, or that waive a check. The gate does not repeat them. A pull request cannot change what either job runs
-at its pinned commit. It can change `ci.yml`'s call, and that change waits on the code owner's review like the
-gate's code. The shared jobs refuse:
+commitlint, or that waive a check. The gate keeps no copy of these refusals. A refusal of its own that overlaps one,
+as the root `.config` does, stays because a program the gate starts reads that path. A pull request cannot change
+what either job runs at its pinned commit. It can change `ci.yml`'s call, and that change waits on the code owner's
+review like the gate's code. The shared jobs refuse:
 
 - A tracked `node_modules` or a path under one, and every tracked symbolic link.
 - An env file Bun loads, tracked at any depth.

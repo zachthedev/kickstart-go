@@ -1,6 +1,7 @@
 # Git hooks, installed once after cloning with `go tool lefthook install`.
-# lefthook is a go.mod tool directive, so the hook scripts resolve it through
-# `go tool` and nothing is fetched at commit time.
+# lefthook is a go.mod tool directive. The hook scripts try a lefthook on
+# PATH and the binary that ran install before `go tool lefthook`, and they
+# fail open when none answers (CONTRIBUTING.md#safety).
 #
 # commitlint is a package.json pin, and it starts as
 # `bun x --bun --no-install`, the one spelling the set uses in hooks,
