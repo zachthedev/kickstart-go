@@ -62,10 +62,9 @@ func intactCheckout(t *testing.T) (string, string) {
 
 // TestRun_Pins drives the dispatch through the pins subcommand, which reads
 // the files from the working directory and asks git what it tracks there.
-// The env cases plant what a committed env file could set to hide itself, and
-// each case variant names a file a case-insensitive filesystem opens as the
-// refused one. A tracked env file at the root is the shared commits job's to
-// refuse, so the gate refuses the one below it.
+// The vendor cases plant a variable a committed .env could set to hide a
+// tracked file, and a case variant a case-insensitive filesystem opens as the
+// refused name.
 func TestRun_Pins(t *testing.T) {
 	dir, git := intactCheckout(t)
 	gitRun := func(args ...string) {
@@ -85,29 +84,19 @@ func TestRun_Pins(t *testing.T) {
 
 	t.Run("an intact checkout holds", func(t *testing.T) { pins(t, 0, "") })
 
-	nested := filepath.Join(dir, "docs", ".env")
-	require.NoError(t, os.MkdirAll(filepath.Dir(nested), 0o700))
-	require.NoError(t, os.WriteFile(nested, []byte("GIT_INDEX_FILE=.git/no-such-index\n"), 0o600))
-	t.Run("an untracked env file is the contributor's own", func(t *testing.T) { pins(t, 0, "") })
-
-	gitRun("add", "--force", "docs/.env")
-	t.Run("a tracked env file below the root exits 1 and names it", func(t *testing.T) { pins(t, 1, `"docs/.env" is tracked`) })
-	t.Run("a tracked env file that sets GIT_INDEX_FILE still exits 1", func(t *testing.T) {
+	vendored := filepath.Join(dir, "Vendor", "modules.txt")
+	require.NoError(t, os.MkdirAll(filepath.Dir(vendored), 0o700))
+	require.NoError(t, os.WriteFile(vendored, []byte("# probe\n"), 0o600))
+	gitRun("add", "--force", "Vendor/modules.txt")
+	require.NoError(t, os.RemoveAll(filepath.Join(dir, "Vendor")))
+	t.Run("a tracked vendor path exits 1 and names it", func(t *testing.T) {
+		pins(t, 1, `"Vendor/modules.txt" is tracked under vendor`)
+	})
+	t.Run("a tracked vendor path still exits 1 under a GIT_INDEX_FILE a .env could set", func(t *testing.T) {
 		t.Setenv("GIT_INDEX_FILE", filepath.Join(dir, ".git", "no-such-index"))
-		pins(t, 1, `"docs/.env" is tracked`)
+		pins(t, 1, `"Vendor/modules.txt" is tracked under vendor`)
 	})
-	gitRun("rm", "--cached", "--quiet", "docs/.env")
-	require.NoError(t, os.RemoveAll(filepath.Join(dir, "docs")))
-
-	upper := filepath.Join(dir, "docs", ".ENV.LOCAL")
-	require.NoError(t, os.MkdirAll(filepath.Dir(upper), 0o700))
-	require.NoError(t, os.WriteFile(upper, []byte("PROBE=1\n"), 0o600))
-	gitRun("add", "--force", "docs/.ENV.LOCAL")
-	t.Run("a tracked case variant of an env file exits 1 and names it", func(t *testing.T) {
-		pins(t, 1, `"docs/.ENV.LOCAL" is tracked, and Bun loads a file of that name`)
-	})
-	gitRun("rm", "--cached", "--quiet", "docs/.ENV.LOCAL")
-	require.NoError(t, os.RemoveAll(filepath.Join(dir, "docs")))
+	gitRun("rm", "--cached", "--quiet", "Vendor/modules.txt")
 
 	config := filepath.Join(dir, ".github", "ActionLint.YAML")
 	require.NoError(t, os.MkdirAll(filepath.Dir(config), 0o700))
@@ -138,14 +127,23 @@ func TestRun_Pins(t *testing.T) {
 
 	workflow := filepath.Join(dir, ".github", "workflows", "ci.yaml")
 	require.NoError(t, os.MkdirAll(filepath.Dir(workflow), 0o700))
-	require.NoError(t, os.WriteFile(workflow, []byte("jobs: {} # zizmor: ignore[excessive-permissions]\n"), 0o600))
+	require.NoError(t, os.WriteFile(workflow, []byte("jobs: {}\n"), 0o600))
 	gitRun("add", "--force", ".github/workflows/ci.yaml")
-	t.Run("a workflow a row would skip exits 1 and names both reasons", func(t *testing.T) {
+	t.Run("a workflow a row would skip exits 1 and names it", func(t *testing.T) {
 		pins(t, 1, `".github/workflows/ci.yaml" is a workflow named .yaml`)
-		pins(t, 1, `".github/workflows/ci.yaml" carries an inline zizmor ignore comment`)
 	})
 	gitRun("rm", "--cached", "--quiet", ".github/workflows/ci.yaml")
 	require.NoError(t, os.RemoveAll(filepath.Join(dir, ".github")))
+
+	action := filepath.Join(dir, "tools", "x", "action.yml")
+	require.NoError(t, os.MkdirAll(filepath.Dir(action), 0o700))
+	require.NoError(t, os.WriteFile(action, []byte("runs:\n  using: composite\n  steps: []\n"), 0o600))
+	gitRun("add", "--force", "tools/x/action.yml")
+	t.Run("a composite action outside .github/actions exits 1 and names it", func(t *testing.T) {
+		pins(t, 1, `"tools/x/action.yml" is a composite action outside .github/actions/`)
+	})
+	gitRun("rm", "--cached", "--quiet", "tools/x/action.yml")
+	require.NoError(t, os.RemoveAll(filepath.Join(dir, "tools")))
 
 	tampered := []byte(intactLock()[:len(intactLock())-1])
 	require.NoError(t, os.WriteFile(filepath.Join(dir, lockPath), bytes.ReplaceAll(tampered, []byte("github-attestations"), []byte("none")), 0o600))

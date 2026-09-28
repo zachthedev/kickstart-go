@@ -65,7 +65,8 @@ does, and the gate's refusals cannot stop that first local run:
   commitlint in the commit hook.
 - commitlint searches through cosmiconfig, which reads a meta config from the root `.config`, a `cosmiconfig` key
   in the root `package.json` or a root `package.yaml`, whatever config commitlint names. An `$import` there runs a
-  module in the commit hook. The gate refuses all three, after the fact.
+  module in the commit hook. The shared `commits` job refuses all three and the gate refuses the `.config`, each
+  after the fact.
 - The hook scripts lefthook writes start `go tool lefthook` itself, and that build reads a branch's `go.work`
   before any job's `GOWORK=off` applies.
 
@@ -280,8 +281,8 @@ The first row reads `mise.toml` and `mise.lock` against the expectations in `int
 installs from the lockfile only after that read passes. `mise.lock` pins `linux-x64`, `macos-arm64` and
 `windows-x64`, and a contributor on another platform relocks in a pull request.
 
-CI and the push hook run `go run ./internal/tools/gate pins` on its own before `go tool task`, so the tree rules,
-the duplicate-key check included, run before `bun install` reads `package.json`. CI's gate job and both push-hook jobs set `GOWORK=off` and
+CI and the push hook run `go run ./internal/tools/gate pins` on its own before `go tool task`, so the tree rules
+refuse a `.taskrc` or a second Taskfile before Task reads one. CI's gate job and both push-hook jobs set `GOWORK=off` and
 `GOFLAGS=-mod=readonly`, so every go command reads `go.mod` alone, never a `go.work`, and builds nothing from a
 `vendor/` directory. A tracked `go.work` could otherwise replace a dependency of the gate itself with code from the
 branch, before `gate pins` refuses the file. `go.mod` still decides the gate's own build: a `replace` builds a
@@ -346,43 +347,47 @@ version comments that name the wrong tag) run in the `workflows` job on every pu
 token, and that job is the one CI job that holds it, so CI's gate job runs zizmor offline. Locally the row runs
 online when `gh auth token` answers, and its summary says which mode ran.
 
-The shared `commits` and `workflows` jobs refuse, before a merge, the data files that run code in Bun or bun
-install, and the gate does not repeat them: a tracked env file at the root, a tracked `node_modules` path or
-`.npmrc`, a `patchedDependencies` key, a `bunfig.toml` key beyond the cooldown, a root file named like a program a
-gate starts, a root entry named `'`, and a `secrets: inherit` call into anything but `zachthedev/.github`'s
-reusable workflows. A pull request cannot change what either job runs at its pinned commit. It can change
-`ci.yml`'s call, and that change waits on the code owner's review like the gate's code.
+The shared `commits` and `workflows` jobs refuse, before a merge, the files that run code in Bun, bun install or
+commitlint, or that waive a check. The gate does not repeat them. A pull request cannot change what either job runs
+at its pinned commit. It can change `ci.yml`'s call, and that change waits on the code owner's review like the
+gate's code. The shared jobs refuse:
+
+- A tracked `node_modules` or a path under one, and every tracked symbolic link.
+- An env file Bun loads, tracked at any depth.
+- A tracked `package.json`, `tsconfig.json` or `jsconfig.json` that is not plain JSON with each key once per
+  object. Bun reads the first copy of a repeated key.
+- `patchedDependencies` or `exports` in any tracked `package.json`, and a `cosmiconfig` key in the root one.
+- A tracked root `.config` or `package.yaml`, where cosmiconfig reads its own settings ([Safety](#safety)).
+- A `bunfig.toml` holding any key but `[install] minimumReleaseAge`.
+- A root file named like a program a gate starts, and a root entry named `'`.
+- An inline `zizmor: ignore[...]` comment under `.github`. A waiver lives in the rules of `.github/zizmor.yml`.
+- A `secrets: inherit` call into anything but `zachthedev/.github`'s reusable workflows, and a `secrets-inherit`
+  waiver that names no such call or names a position.
 
 A reviewer, not the gate, refuses a tracked file no row checks: anything under `dist/`, `coverage/`,
 `.claude/worktrees/` or a `.git`, `.sl`, `.svn`, `.hg` or `.jj` directory, a JavaScript or declaration file beyond
-the ones a tool needs, such as `commitlint.config.js`, a personal file such as `.claude/settings.local.json`, and a
-Go package under an `_` directory or below a second `go.mod`, or a package under `testdata` that a build imports
-([Where code goes](#where-code-goes)). Each sits in
-the diff and no row reads it. `.prettierrc` holds formatting options alone, and a reviewer refuses a `plugins` key
-or a string value, since Prettier loads either as code.
+the ones a tool needs, such as `commitlint.config.js`, a personal file such as `.claude/settings.local.json`, a
+tracked `.npmrc`, and a Go package under an `_` directory or below a second `go.mod`, or a package under `testdata`
+that a build imports ([Where code goes](#where-code-goes)). Each sits in the diff and no row reads it. A registry an
+`.npmrc` names fails every package's integrity check against `bun.lock`. `.prettierrc` holds formatting options
+alone, and a reviewer refuses a `plugins` key or a string value, since Prettier loads either as code.
 
 `gate pins` refuses what the programs the gate starts read before any check of their own and no shared job
-refuses. Names compare with case folded, because Windows and macOS open a tracked `.ENV` as `.env`. Tracked, it
+refuses. Names compare with case folded, because Windows and macOS open a tracked `Vendor` as `vendor`. Tracked, it
 refuses:
 
-- An env file Bun loads, below the root. The `commits` job refuses one at the root. `.gitignore` names all eight,
-  and an untracked one passes.
-- A `package.json` carrying a duplicated key at any depth. Bun keeps the first copy, while jq, which the `commits`
-  job reads the file with, and Go keep the last, so no check can tell what Bun reads.
-- A `cosmiconfig` key in the root `package.json`, which commitlint's config loader reads ([Safety](#safety)).
 - Anything under `vendor/`, which go builds from in place of the module cache when no `-mod` flag is set.
 - A workflow whose extension is anything but `.yml`, the one spelling actionlint's list and zizmor's collection
   both match.
-- An inline `zizmor: ignore[...]` comment anywhere under `.github`. A waiver lives in the rules of
-  `.github/zizmor.yml`, with the file it covers. The `workflows` job refuses one too, but its search skips a file
-  `.gitattributes` marks binary, and the gate reads every file itself.
+- A composite action, an `action.yml` or `action.yaml` in any case, anywhere but under `.github/actions/` in that
+  spelling. A workflow's `uses: ./<path>` runs an action from any path, and zizmor reads `.github` alone, so an
+  action elsewhere, `.GitHub` or an 8.3 short name such as `GITHUB~1` included, runs with no audit.
 - A `replace`, `godebug` or `ignore` line in `go.mod`. An `ignore` line takes its directories out of every `./...`
   row.
 
 It refuses a root `.config` in any case and any form, committed or not, because mise, the dotnet tool manifest,
-cosmiconfig's meta config and lefthook all read configs from it. It refuses a root `package.yaml` the same way,
-since cosmiconfig reads a meta config there too. It refuses a root `vendor` on disk, which go builds from unless a
-`-mod` flag says otherwise, while CI's gate sets `-mod=readonly`.
+cosmiconfig's meta config and lefthook all read configs from it. It refuses a root `vendor` on disk, which go builds
+from unless a `-mod` flag says otherwise, while CI's gate sets `-mod=readonly`.
 
 Every program the gate starts that searches for its own config runs with one config named: `.prettierrc` (with
 `.prettierignore` and no `.editorconfig`), `.golangci.yml`, `.taplo.toml`, `.github/zizmor.yml` and
@@ -593,6 +598,10 @@ A local run that fails or disagrees with CI:
   or have that account take ownership of it.
 - A row that fails five seconds after its tool exits, because a process the tool started still holds its output.
   That process runs on, so find it and end it.
+- A file on a Windows checkout that differs from the diff. A tracked path spelled in another case, such as
+  `.GitHub/zizmor.yml`, or through an 8.3 short name, such as `GITHUB~1/zizmor.yml` or `packag~1.jso`, opens the same
+  file as the real name, and git warns of the collision as it checks out. The Windows run then reads a file the
+  diff names elsewhere. CI's Linux legs and the shared jobs read the real files, so read the diff for such a pair.
 - A race row that prints that it did not run. The machine has no C compiler on `PATH` ([Setup](#setup)).
 
 ## What never happens

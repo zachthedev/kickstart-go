@@ -41,8 +41,8 @@ Thumbs.db
 
 # Operator's own build settings, which Taskfile.yml loads, and the other env
 # files Bun loads from the directory it starts in. Each belongs to one
-# contributor, and the gate refuses a tracked one. .env.template is generated
-# and committed.
+# contributor, and the shared commits job refuses a tracked one.
+# .env.template is generated and committed.
 .env
 .env.local
 .env.development

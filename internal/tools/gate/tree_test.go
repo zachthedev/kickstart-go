@@ -172,9 +172,10 @@ func TestFold(t *testing.T) {
 	}
 }
 
-// Each case plants one entry at the root, and the check must refuse .config,
-// vendor and package.yaml in any form and any case, and pass everything else.
-// A lone single quote is the shared workflows job's to refuse.
+// Each case plants one entry at the root, and the check must refuse .config
+// and vendor in any form and any case, and pass everything else. A lone single
+// quote is the shared workflows job's to refuse, and a tracked package.yaml
+// the shared commits job's.
 func TestRootFindings(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -188,15 +189,8 @@ func TestRootFindings(t *testing.T) {
 		{name: "a vendor directory", plant: func(t *testing.T, dir string) { mkdir(t, dir, "Vendor") }, wantIn: `"Vendor" sits at the root, and go builds from it`},
 		{name: "a config directory with no dot", plant: func(t *testing.T, dir string) { mkdir(t, dir, "config") }},
 		{name: "a .config below the root", plant: func(t *testing.T, dir string) { mkdir(t, dir, "docs/.config") }},
-		{name: "a package.yaml", plant: func(t *testing.T, dir string) {
-			require.NoError(t, os.WriteFile(filepath.Join(dir, "package.yaml"), []byte("cosmiconfig:\n  $import: [./probe.mjs]\n"), 0o600))
-		}, wantIn: `"package.yaml" sits at the root, and cosmiconfig reads a cosmiconfig key in it as commitlint's meta config`},
-		{name: "a package.yaml in capitals, empty", plant: func(t *testing.T, dir string) {
-			require.NoError(t, os.WriteFile(filepath.Join(dir, "Package.YAML"), nil, 0o600))
-		}, wantIn: `"Package.YAML" sits at the root`},
-		{name: "a package.yaml below the root", plant: func(t *testing.T, dir string) { mkdir(t, dir, "docs/package.yaml") }},
-		{name: "a package.yml, which cosmiconfig never reads", plant: func(t *testing.T, dir string) {
-			require.NoError(t, os.WriteFile(filepath.Join(dir, "package.yml"), nil, 0o600))
+		{name: "a package.yaml, which the commits job refuses when tracked", plant: func(t *testing.T, dir string) {
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "package.yaml"), nil, 0o600))
 		}},
 		{name: "a directory named by a single quote", plant: func(t *testing.T, dir string) { mkdir(t, dir, "'/tmp") }},
 		{name: "a file named by a single quote", plant: func(t *testing.T, dir string) {

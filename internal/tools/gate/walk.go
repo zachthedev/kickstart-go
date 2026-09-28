@@ -57,6 +57,12 @@ const (
 	verbosePrefix = "verbose: "
 	// workflowsDir is where GitHub reads workflows, one level deep.
 	workflowsDir = ".github/workflows"
+	// actionsDir is where every composite action lives, the one directory
+	// under .github that zizmor audits actions in.
+	actionsDir = ".github/actions"
+	// actionFile is the name GitHub reads a composite action's metadata from,
+	// before .yml or .yaml.
+	actionFile = "action"
 	// installedBin is where bun install puts each package's command, the one
 	// bunx runs.
 	installedBin = "node_modules/.bin"
@@ -71,9 +77,6 @@ var (
 	// linted a file, "Found total 0 errors in 93 ms for <path>", behind any
 	// number of prefixes.
 	actionlintFinished = regexp.MustCompile(`^(?:verbose: )*Found total .* for (.+)$`)
-	// inlineWaiver matches zizmor's inline ignore comment, which waives an
-	// audit for the line it sits on.
-	inlineWaiver = regexp.MustCompile(`(?i)zizmor:\s*ignore\[`)
 	// allowedShells are the shell: values a workflow may name. actionlint hands
 	// a run: script to ShellCheck under bash or sh alone, and pwsh is the one
 	// other shell the set runs, so any other value, a command line such as
@@ -87,34 +90,25 @@ var (
 
 // walkedFindings refuses a tracked workflow whose extension is not a
 // lowercase .yml, which actionlint's file list and zizmor's collection would
-// each skip, and an inline zizmor waiver in any tracked file under .github,
-// which only .github/zizmor.yml may carry. The shared workflows job refuses
-// the waiver with git grep -I, which skips a file .gitattributes marks binary
-// or -diff, so this check reads every file itself. Names compare through fold.
-func walkedFindings(dir string, tracked []string) ([]string, error) {
+// each skip, and a tracked composite action anywhere but under
+// .github/actions/ in that exact spelling. A workflow's `uses: ./<path>` runs
+// an action from any path in the checkout, while zizmor reads .github alone,
+// so an action elsewhere, .GitHub or an 8.3 short name included, runs with no
+// audit. Names compare through fold, and the directory in exact spelling.
+func walkedFindings(tracked []string) []string {
 	var found []string
 	for _, name := range tracked {
-		ext := path.Ext(name)
+		ext, base := path.Ext(name), fold(path.Base(name))
 		if fold(path.Dir(name)) == fold(workflowsDir) && (fold(ext) == fold(".yml") || fold(ext) == fold(".yaml")) && ext != ".yml" {
 			found = append(found, fmt.Sprintf("%q is a workflow named %s, and every workflow here ends in .yml, the one spelling actionlint's own list and zizmor's collection both match. Rename it",
 				name, ext))
 		}
-		if !strings.HasPrefix(fold(name), fold(".github")+"/") {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(name)))
-		if errors.Is(err, fs.ErrNotExist) {
-			continue
-		}
-		if err != nil {
-			return nil, fmt.Errorf("reading %s: %w", name, err)
-		}
-		if inlineWaiver.Match(data) {
-			found = append(found, fmt.Sprintf("%q carries an inline zizmor ignore comment, which waives an audit outside %s, the one waiver list, which the workflows row names. Move the waiver into its rules",
-				name, zizmorConfig))
+		if (base == fold(actionFile+".yml") || base == fold(actionFile+".yaml")) && !strings.HasPrefix(name, actionsDir+"/") {
+			found = append(found, fmt.Sprintf("%q is a composite action outside %s/, and zizmor, which reads .github alone, never audits it while a workflow's uses: ./ runs it. Move it under %s/<name>/",
+				name, actionsDir, actionsDir))
 		}
 	}
-	return found, nil
+	return found
 }
 
 // ///////////////////////////////////////////////
