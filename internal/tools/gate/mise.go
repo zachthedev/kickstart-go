@@ -29,7 +29,7 @@ const urlReplacementsEnv = "MISE_URL_REPLACEMENTS"
 // ///////////////////////////////////////////////
 
 // miseInherited names, per operating system, the only variables a mise child
-// takes from the environment it inherits. On Windows mise 2026.9.11 needs
+// takes from the environment it inherits. On Windows the pinned mise needs
 // SystemRoot, LOCALAPPDATA and a temporary directory: systemFolders supplies
 // the first two from the system, and TEMP and TMP come through. Elsewhere mise
 // derives every directory from HOME and the temporary one from TMPDIR, and

@@ -11,8 +11,8 @@ set: [errexit, pipefail]
 # file is the ordinary case; `.env.template` documents what may go in here.
 # The shared commits job refuses a tracked copy before a merge, because every
 # task would load it. CI and the push hook run `gate pins` on its own before
-# they start task, so the tree rules, the duplicate-key check included, run
-# before bun install reads package.json.
+# they start task, so the tree rules refuse a .taskrc or a second Taskfile
+# before Task reads one.
 dotenv: ['.env']
 
 # Every go command a task runs reads go.mod alone, never a go.work, which
@@ -159,7 +159,7 @@ tasks:
   # Prettier owns every file Go does not: YAML, JSON, Markdown. The gate
   # starts it through `bun x --bun --no-install` under the pinned Bun, and
   # first refuses a checkout whose node_modules/.bin holds no Prettier, where
-  # bunx would run a copy from a parent directory, PATH or its cache. It names
+  # `bun x` would run a copy from a parent directory, PATH or its cache. It names
   # .prettierrc and .prettierignore and turns .editorconfig off, so Prettier
   # searches for no config of its own, and .gitignore narrows nothing. Prettier
   # exits 0 over a tree where it matched nothing, so the gate counts the files

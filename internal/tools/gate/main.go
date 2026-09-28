@@ -56,6 +56,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"runtime"
 	"strings"
 	"syscall"
 )
@@ -88,7 +89,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			fmt.Fprintln(stderr, "gate tests: go test -json arrives on stdin, and the row takes no argument")
 			return 2
 		}
-		return testsRow(stdin, stdout, stderr)
+		return testsRow(stdin, runtime.GOOS, stdout, stderr)
 	}
 	if code, ok := walkCommand(ctx, args, stdout, stderr); ok {
 		return code

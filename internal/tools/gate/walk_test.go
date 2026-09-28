@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// prettierArgs is the command line the format row hands bun: bunx under the
+// prettierArgs is the command line the format row hands bun: `bun x` under the
 // pinned Bun, then Prettier's own arguments.
 var prettierArgs = []string{
 	"x", "--bun", "--no-install", "prettier", "--check", "--debug-check",
@@ -48,7 +48,7 @@ func writeFiles(t *testing.T, root string, names ...string) {
 	}
 }
 
-// taploLog is taplo 0.10.0's found files line over the named files under
+// taploLog is the pinned taplo's found files line over the named files under
 // root, spelled as taplo spells them.
 func taploLog(root string, names ...string) string {
 	var quoted []string
@@ -251,9 +251,9 @@ func TestFormatFindings(t *testing.T) {
 		_, err := formatFindings(run, "bun-path", root)
 		assert.ErrorContains(t, err, "running bun-path")
 	})
-	t.Run("Prettier not installed, so bunx never starts", func(t *testing.T) {
+	t.Run("Prettier not installed, so bun x never starts", func(t *testing.T) {
 		run := func(string, []string, ...string) (output, error) {
-			t.Fatal("bunx must not start before the install holds Prettier")
+			t.Fatal("bun x must not start before the install holds Prettier")
 			return output{}, nil
 		}
 		_, err := formatFindings(run, "bun-path", t.TempDir())
@@ -555,77 +555,55 @@ func TestCountFiles(t *testing.T) {
 	assert.Equal(t, "0 files", countFiles(0, ""))
 }
 
-// Each case hands the check tracked paths, with the content of any it reads,
-// and the check must refuse a workflow whose extension is not a lowercase
-// .yml and an inline zizmor waiver anywhere under .github, and let every other
-// path pass. A path under a version control directory is review's to refuse.
+// Each case hands the check tracked paths, and the check must refuse a
+// workflow whose extension is not a lowercase .yml, a composite action
+// anywhere but under .github/actions in that spelling, and one under it named
+// in another case than action.yml or action.yaml, naming the spelling to
+// take, and let every other path pass. An inline zizmor waiver under .github
+// is the shared workflows job's to refuse, and a path under a version control
+// directory is review's.
 func TestWalkedFindings(t *testing.T) {
 	tests := []struct {
 		name    string
 		tracked []string
-		files   map[string]string
-		wantIn  string
+		wantIn  []string
 	}{
-		{name: "a workflow in capitals", tracked: []string{".github/workflows/UP.YML"}, wantIn: `".github/workflows/UP.YML" is a workflow named .YML, and every workflow here ends in .yml`},
-		{name: "a workflow named .yaml", tracked: []string{".github/workflows/ci.yaml"}, wantIn: "is a workflow named .yaml"},
-		{name: "a workflow directory in capitals", tracked: []string{".GitHub/Workflows/cd.Yml"}, wantIn: "is a workflow named .Yml"},
+		{name: "a workflow in capitals", tracked: []string{".github/workflows/UP.YML"}, wantIn: []string{`".github/workflows/UP.YML" is a workflow named .YML, and every workflow here ends in .yml`}},
+		{name: "a workflow named .yaml", tracked: []string{".github/workflows/ci.yaml"}, wantIn: []string{"is a workflow named .yaml"}},
 		{name: "a workflow named .yml", tracked: []string{".github/workflows/ci.yml"}},
 		{name: "a YAML file beside the workflows", tracked: []string{".github/dependabot.YAML"}},
 		{name: "a YAML file one level below the workflows", tracked: []string{".github/workflows/nested/x.YAML"}},
 		{name: "a path under a version control directory, which review holds", tracked: []string{"docs/.git/notes.md", ".JJ/repo/x.yml"}},
-		{
-			name: "an inline zizmor waiver in a workflow", tracked: []string{".github/workflows/cd.yml"},
-			files:  map[string]string{".github/workflows/cd.yml": "jobs:\n  a:\n    secrets: inherit # zizmor: ignore[secrets-inherit]\n"},
-			wantIn: `".github/workflows/cd.yml" carries an inline zizmor ignore comment, which waives an audit outside .github/zizmor.yml`,
-		},
-		{
-			name: "an inline waiver in a file .gitattributes marks binary, which git grep -I skips", tracked: []string{".gitattributes", ".github/workflows/cd.yml"},
-			files: map[string]string{
-				".gitattributes":           ".github/workflows/cd.yml -diff\n",
-				".github/workflows/cd.yml": "jobs:\n  a:\n    secrets: inherit # zizmor: ignore[secrets-inherit]\n",
-			},
-			wantIn: `".github/workflows/cd.yml" carries an inline zizmor ignore comment`,
-		},
-		{
-			name: "an inline waiver spelled another way, in a directory in capitals", tracked: []string{".GitHub/actions/x/action.yml"},
-			files:  map[string]string{".GitHub/actions/x/action.yml": "runs: # ZIZMOR:ignore[unpinned-uses]\n"},
-			wantIn: "carries an inline zizmor ignore comment",
-		},
-		{
-			name: "an inline waiver outside .github, which zizmor never reads", tracked: []string{"docs/usage.md"},
-			files: map[string]string{"docs/usage.md": "# zizmor: ignore[x]\n"},
-		},
-		{
-			name: "zizmor.yml, whose rules are the one waiver list", tracked: []string{zizmorConfig},
-			files: map[string]string{zizmorConfig: "rules:\n  secrets-inherit:\n    ignore:\n      - cd.yml\n"},
-		},
-		{name: "a tracked file the work tree deleted", tracked: []string{".github/workflows/gone.yml"}},
+		{name: "a workflow directory in capitals", tracked: []string{".GitHub/Workflows/cd.Yml"}, wantIn: []string{"is a workflow named .Yml"}},
+		{name: "a composite action under .github/actions", tracked: []string{".github/actions/x/action.yml", ".github/actions/y/action.yaml"}},
+		{name: "a composite action under tools", tracked: []string{"tools/x/action.yml"}, wantIn: []string{
+			`"tools/x/action.yml" is a composite action outside .github/actions/, and zizmor, which reads .github alone, never audits it while a workflow's uses: ./ runs it. Move it under .github/actions/<name>/`,
+		}},
+		{name: "a composite action under .GitHub", tracked: []string{".GitHub/actions/x/action.yml"}, wantIn: []string{`".GitHub/actions/x/action.yml" is a composite action outside .github/actions/`}},
+		{name: "a composite action under an 8.3 short name for .github", tracked: []string{"GITHUB~1/actions/x/action.yml"}, wantIn: []string{`"GITHUB~1/actions/x/action.yml" is a composite action`}},
+		{name: "a composite action at the root", tracked: []string{"action.yml"}, wantIn: []string{`"action.yml" is a composite action`}},
+		{name: "action metadata named in capitals", tracked: []string{"ci/x/Action.YAML"}, wantIn: []string{`"ci/x/Action.YAML" is a composite action`}},
+		{name: "a workflow file named action.yml", tracked: []string{".github/workflows/action.yml"}, wantIn: []string{`".github/workflows/action.yml" is a composite action`}},
+		{name: "a composite action nested below .github/actions", tracked: []string{".github/actions/deep/sub/action.yml"}},
+		{name: "action metadata under .github/actions named in capitals", tracked: []string{".github/actions/upper/ACTION.YML"}, wantIn: []string{
+			`".github/actions/upper/ACTION.YML" names a composite action in another case than action.yml, and zizmor, which collects that spelling alone, never audits it while a case-insensitive runner opens it for uses: ./. Rename it action.yml`,
+		}},
+		{name: "an action.yaml under .github/actions in mixed case", tracked: []string{".github/actions/mixed/Action.Yaml"}, wantIn: []string{
+			`".github/actions/mixed/Action.Yaml" names a composite action in another case than action.yaml, and zizmor, which collects that spelling alone, never audits it while a case-insensitive runner opens it for uses: ./. Rename it action.yaml`,
+		}},
+		{name: "action metadata in capitals under .GitHub is refused as outside alone", tracked: []string{".GitHub/actions/x/ACTION.YML"}, wantIn: []string{`".GitHub/actions/x/ACTION.YML" is a composite action outside .github/actions/`}},
+		{name: "a name that only starts like action metadata", tracked: []string{"docs/action.yml.md", "tools/actions.yml"}},
+		{name: "an inline zizmor waiver under .github, which the workflows job refuses", tracked: []string{".github/workflows/cd.yml", zizmorConfig}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			dir := t.TempDir()
-			for name, content := range tt.files {
-				target := filepath.Join(dir, filepath.FromSlash(name))
-				require.NoError(t, os.MkdirAll(filepath.Dir(target), 0o700))
-				require.NoError(t, os.WriteFile(target, []byte(content), 0o600))
+			found := walkedFindings(tt.tracked)
+			require.Len(t, found, len(tt.wantIn), "findings: %q", found)
+			for i, want := range tt.wantIn {
+				assert.Contains(t, found[i], want)
 			}
-			found, err := walkedFindings(dir, tt.tracked)
-			require.NoError(t, err)
-			if tt.wantIn == "" {
-				assert.Empty(t, found)
-				return
-			}
-			require.Len(t, found, 1)
-			assert.Contains(t, found[0], tt.wantIn)
 		})
 	}
-
-	t.Run("a tracked path under .github that is a directory is an error", func(t *testing.T) {
-		dir := t.TempDir()
-		require.NoError(t, os.MkdirAll(filepath.Join(dir, ".github", "x"), 0o700))
-		_, err := walkedFindings(dir, []string{".github/x"})
-		assert.ErrorContains(t, err, "reading .github/x")
-	})
 }
 
 func TestEscaped(t *testing.T) {

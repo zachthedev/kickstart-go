@@ -46,7 +46,7 @@ func Variables() []Variable {
 		{
 			Name:    "VERSION",
 			Purpose: "SemVer string stamped into the binary and reported by the version flag.",
-			Example: "1.4.2",
+			Example: "2.3.4",
 			Absent:  "the version comes from git describe, or 0.0.0-dev outside a repository",
 		},
 		{

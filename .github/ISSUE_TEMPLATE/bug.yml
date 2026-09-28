@@ -43,7 +43,7 @@ body:
     id: environment
     attributes:
       label: Environment
-      description: The operating system and its version, and whatever runtime the project runs on.
-      placeholder: 'Windows 11 24H2, Bun 1.4.2'
+      description: The operating system and its version, and the release you ran.
+      placeholder: 'Windows 11 24H2, version x.y.z'
     validations:
       required: true

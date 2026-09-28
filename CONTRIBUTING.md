@@ -14,7 +14,11 @@ The machine needs:
 - [mise](https://mise.jdx.dev). It installs the tools `mise.toml` pins at the versions `mise.lock` records.
 - [git](https://git-scm.com) 2.41 or newer. The absorbed command `MARKERS.md` prints passes `--attr-source`, which
   older git refuses, and the test that runs that command skips on an older git and says why.
+- `sh` on `PATH`. Git for Windows ships it, and Linux and macOS have it. The race row runs its script through it,
+  and the printed-check test needs it.
 - A C compiler on `PATH`, for the race detector. Without one the race row prints that it did not run.
+- On Windows, the right to create a symbolic link, which Developer Mode grants. Several tests make one, and without
+  it they skip past what the test rows declare ([Troubleshooting](#troubleshooting)).
 - [gh](https://cli.github.com), optional. When `gh auth token` answers within five seconds, the gate runs zizmor
   online; otherwise zizmor runs offline and no token is needed.
 
@@ -32,7 +36,7 @@ installs the mise tools from the lockfile. Before you install a branch you did n
 
 Run `bun install --frozen-lockfile` again after every pull, after every branch switch and in every new worktree,
 before you run the gate or commit. The format row and the commit hook start Prettier and commitlint through
-`bunx --bun --no-install`, which runs the copy this checkout's `node_modules/.bin` holds. The format row refuses
+`bun x --bun --no-install`, which runs the copy this checkout's `node_modules/.bin` holds. The format row refuses
 to start while that copy is missing. The hook does not check, and a missing or stale copy there runs another one
 ([Troubleshooting](#troubleshooting)). `package.json` carries no install script, so
 `bun install --frozen-lockfile --ignore-scripts`, the form the gate's message names for a worktree, installs the
@@ -50,10 +54,11 @@ entries for `--output` and `--no-index`, and adds nothing to it.
 
 ## Safety
 
-A pull request controls its own gate: `Taskfile.yml`, the gate's code under `internal/tools/gate`, `go.mod`, the
-hooks and the scripts under `scripts/`. Before you run anything on a branch you did not write, read its diff. Then
-install it with `bun install --frozen-lockfile --ignore-scripts`. Some of the branch's code runs before any check
-does, and the gate's refusals cannot stop that first local run:
+A pull request controls its own install, hooks and gate code: `Taskfile.yml`, the gate's code under
+`internal/tools/gate`, `go.mod`, the hooks and the scripts under `scripts/`. Read a branch's diff before you run
+anything on it, a commit included, since the commit hook runs the branch's own `commitlint.config.js`. Install a
+branch you have not read with `bun install --frozen-lockfile --ignore-scripts`, which runs no package's install
+script. Some of the branch's code runs before any check does:
 
 - A local `go tool task` builds Task under a branch's `go.work` and loads the branch's `.env` before its first
   command. The Taskfile sets `GOWORK=off` and `GOFLAGS=-mod=readonly` for every command after that, unless the
@@ -65,30 +70,40 @@ does, and the gate's refusals cannot stop that first local run:
   commitlint in the commit hook.
 - commitlint searches through cosmiconfig, which reads a meta config from the root `.config`, a `cosmiconfig` key
   in the root `package.json` or a root `package.yaml`, whatever config commitlint names. An `$import` there runs a
-  module in the commit hook. The gate refuses all three, after the fact.
-- The hook scripts lefthook writes start `go tool lefthook` itself, and that build reads a branch's `go.work`
-  before any job's `GOWORK=off` applies.
+  module in the commit hook. The shared `commits` job refuses all three and the gate refuses the `.config`, each
+  after the fact.
+- The hook scripts lefthook writes try, in order, `LEFTHOOK_BIN`, a `lefthook` on `PATH`, the binary in Go's build
+  cache that ran `go tool lefthook install`, a copy under `node_modules`, `go tool lefthook`, then other package
+  managers' runners. The `go tool` build reads a branch's `go.work` before any job's `GOWORK=off` applies.
 
-Read the diff before you commit on the branch too, since the commit hook runs the branch's own code.
+The shared jobs refuse such a branch before it merges, and nothing stops its first run on your machine but the diff
+read.
 
 What reaches the tools from your own environment:
 
-- `BUN_OPTIONS` hands its flags to every direct Bun start. The ones this repository makes, `bun install` and
-  `bun run audit`, run no module from a `--preload` in it. The gate withholds it from the processes it starts, and
-  a tool started through `bunx --bun --no-install` does not read it. Leave it unset.
-- `BUN_INSPECT`, `BUN_INSPECT_CONNECT_TO` and `BUN_INSPECT_PRELOAD`. Leave all three unset. The gate passes them
-  to the programs it starts. Bun reads them in a direct start, where `BUN_INSPECT_PRELOAD` runs a module and the
-  other two open its inspector. A tool started through `bunx --bun --no-install` ran no such preload.
-- A personal env file. `bunx` ignores `--no-env-file`, so Prettier and commitlint load an untracked `.env`,
-  `.env.local` or another name Bun loads from the root. `Taskfile.yml` loads `.env` into every task.
-  [Troubleshooting](#troubleshooting) says what that can change.
+- `BUN_OPTIONS` reaches every direct Bun start: `bun install` and `bun run audit` here, and neither runs a module
+  from a `--preload` in it. The gate withholds it from the processes it starts, and a tool started through
+  `bun x --bun --no-install` does not read it. No JavaScript tool the gate or the hooks start through `bun x` starts
+  Bun children of its own. A tool that does, such as wrangler or vitest, passes `BUN_OPTIONS` and
+  `BUN_INSPECT_PRELOAD` on to them, and a repository that runs one names it here. Leave it unset.
+- `BUN_INSPECT`, `BUN_INSPECT_CONNECT_TO` and `BUN_INSPECT_PRELOAD`. Leave them unset too. The last runs a module in
+  a Bun start such as `bun -e`. It runs none in `bun install`, `bun run audit` or the `bun x` starts here, and
+  nothing in the hooks or the gate clears them.
+- A personal env file. `bun x` ignores `--no-env-file`, so an untracked `.env` reaches Prettier and commitlint, the
+  JavaScript tools the format row and the commit hook start, and can change what one reports. `Taskfile.yml` loads
+  `.env` into every task too ([Troubleshooting](#troubleshooting)).
+- `MISE_BACKENDS_<TOOL>`. Leave it unset. It overrides a tool's backend from the environment, and no setting reports
+  it. The gate starts mise without it, and a mise you run yourself reads it.
 
-The hooks are not a control:
+The hooks are no control:
 
 - A hook runs in your own environment and clears nothing from it.
-- lefthook merges a branch's `lefthook-local.*` or `.config/lefthook-local.*` over `lefthook.yml`, and a job there
-  with a hook job's name replaces it before any job runs. A hook catches an accident, never a hostile branch.
-- A fresh clone runs no hook until `go tool lefthook install` runs.
+- The hooks fail open. The hook script `go tool lefthook install` writes prints `Can't find lefthook in PATH` and
+  exits 0 when it finds no lefthook binary, as when `go` is not on `PATH` and Go's build cache no longer holds the
+  binary that ran `install`, and the commit or push goes through unchecked. A fresh clone runs no hook until
+  `go tool lefthook install` runs.
+- They catch an accident, never a hostile branch. lefthook merges a branch's `lefthook-local.*` or
+  `.config/lefthook-local.*` over `lefthook.yml`, and a job there with a hook job's name replaces it.
 
 CI's `commits` job and gate decide the merge.
 
@@ -280,8 +295,8 @@ The first row reads `mise.toml` and `mise.lock` against the expectations in `int
 installs from the lockfile only after that read passes. `mise.lock` pins `linux-x64`, `macos-arm64` and
 `windows-x64`, and a contributor on another platform relocks in a pull request.
 
-CI and the push hook run `go run ./internal/tools/gate pins` on its own before `go tool task`, so the tree rules,
-the duplicate-key check included, run before `bun install` reads `package.json`. CI's gate job and both push-hook jobs set `GOWORK=off` and
+CI and the push hook run `go run ./internal/tools/gate pins` on its own before `go tool task`, so the tree rules
+refuse a `.taskrc` or a second Taskfile before Task reads one. CI's gate job and both push-hook jobs set `GOWORK=off` and
 `GOFLAGS=-mod=readonly`, so every go command reads `go.mod` alone, never a `go.work`, and builds nothing from a
 `vendor/` directory. A tracked `go.work` could otherwise replace a dependency of the gate itself with code from the
 branch, before `gate pins` refuses the file. `go.mod` still decides the gate's own build: a `replace` builds a
@@ -302,7 +317,7 @@ a row reads gets `NO_COLOR=1`, and the row strips terminal escape sequences from
 a line, since some tools color their output on a CI runner and print it plain locally. A finding quotes the text
 it names from a file, so no control character in it reaches the terminal.
 
-The format row starts Prettier through `bunx --bun --no-install`, under the Bun `PATH` names. It first refuses a
+The format row starts Prettier through `bun x --bun --no-install`, under the Bun `PATH` names. It first refuses a
 checkout whose `node_modules/.bin` holds no Prettier that resolves, through every link, to a regular file, and
 names the install to run.
 
@@ -329,7 +344,11 @@ alone, so the workflows row refuses a `shell:` value other than `bash`, `sh` or 
 
 Every test row pipes `go test -json` through `go run ./internal/tools/gate tests`, which fails unless a test ran and
 passed and none failed. go test exits 0 when a `-run`, `-skip` or `-short` in a `GOFLAGS` the shell exports skips
-every test, and when no test matched, so its exit code alone proves nothing.
+every test, and when no test matched, so its exit code alone proves nothing. The row also fails when the number of
+skipped tests differs from what `declaredSkips` in `internal/tools/gate/tests.go` declares for the platform, and
+names the tests that skipped. A skip past the count is a test that did not run, and a count short of it is a
+declaration to lower. The counts cover the cases for a behavior another platform alone has, so every machine of a
+platform skips the same tests. A case that needs a program to be missing builds its own `PATH`.
 
 The gate sets no deadline of its own on a row. CI's gate job carries `timeout-minutes: 30`, and locally Ctrl-C ends
 a hung tool. `gh auth token` alone runs under five seconds, past which the zizmor row runs offline. A program that
@@ -346,43 +365,50 @@ version comments that name the wrong tag) run in the `workflows` job on every pu
 token, and that job is the one CI job that holds it, so CI's gate job runs zizmor offline. Locally the row runs
 online when `gh auth token` answers, and its summary says which mode ran.
 
-The shared `commits` and `workflows` jobs refuse, before a merge, the data files that run code in Bun or bun
-install, and the gate does not repeat them: a tracked env file at the root, a tracked `node_modules` path or
-`.npmrc`, a `patchedDependencies` key, a `bunfig.toml` key beyond the cooldown, a root file named like a program a
-gate starts, a root entry named `'`, and a `secrets: inherit` call into anything but `zachthedev/.github`'s
-reusable workflows. A pull request cannot change what either job runs at its pinned commit. It can change
-`ci.yml`'s call, and that change waits on the code owner's review like the gate's code.
+The shared `commits` and `workflows` jobs refuse, before a merge, the files that run code in Bun, bun install or
+commitlint, or that waive a check. The gate keeps no copy of these refusals. A refusal of its own that overlaps one,
+as the root `.config` does, stays because a program the gate starts reads that path. A pull request cannot change
+what either job runs at its pinned commit. It can change `ci.yml`'s call, and that change waits on the code owner's
+review like the gate's code. The shared jobs refuse:
+
+- A tracked `node_modules` or a path under one, and every tracked symbolic link.
+- An env file Bun loads, tracked at any depth.
+- A tracked `package.json`, `tsconfig.json` or `jsconfig.json` that is not plain JSON with each key once per
+  object. Bun reads the first copy of a repeated key.
+- `patchedDependencies` or `exports` in any tracked `package.json`, and a `cosmiconfig` key in the root one.
+- A tracked root `.config` or `package.yaml`, where cosmiconfig reads its own settings ([Safety](#safety)).
+- A `bunfig.toml` holding any key but `[install] minimumReleaseAge`.
+- A root file named like a program a gate starts, and a root entry named `'`.
+- An inline `zizmor: ignore[...]` comment under `.github`. A waiver lives in the rules of `.github/zizmor.yml`.
+- A `secrets: inherit` call into anything but `zachthedev/.github`'s reusable workflows, and a `secrets-inherit`
+  waiver that names no such call or names a position.
 
 A reviewer, not the gate, refuses a tracked file no row checks: anything under `dist/`, `coverage/`,
 `.claude/worktrees/` or a `.git`, `.sl`, `.svn`, `.hg` or `.jj` directory, a JavaScript or declaration file beyond
-the ones a tool needs, such as `commitlint.config.js`, a personal file such as `.claude/settings.local.json`, and a
-Go package under an `_` directory or below a second `go.mod`, or a package under `testdata` that a build imports
-([Where code goes](#where-code-goes)). Each sits in
-the diff and no row reads it. `.prettierrc` holds formatting options alone, and a reviewer refuses a `plugins` key
-or a string value, since Prettier loads either as code.
+the ones a tool needs, such as `commitlint.config.js`, a personal file such as `.claude/settings.local.json`, a
+tracked `.npmrc`, and a Go package under an `_` directory or below a second `go.mod`, or a package under `testdata`
+that a build imports ([Where code goes](#where-code-goes)). Each sits in the diff and no row reads it. A registry an
+`.npmrc` names fails every package's integrity check against `bun.lock`. `.prettierrc` holds formatting options
+alone, and a reviewer refuses a `plugins` key or a string value, since Prettier loads either as code.
 
 `gate pins` refuses what the programs the gate starts read before any check of their own and no shared job
-refuses. Names compare with case folded, because Windows and macOS open a tracked `.ENV` as `.env`. Tracked, it
+refuses. Names compare with case folded, because Windows and macOS open a tracked `Vendor` as `vendor`. Tracked, it
 refuses:
 
-- An env file Bun loads, below the root. The `commits` job refuses one at the root. `.gitignore` names all eight,
-  and an untracked one passes.
-- A `package.json` carrying a duplicated key at any depth. Bun keeps the first copy, while jq, which the `commits`
-  job reads the file with, and Go keep the last, so no check can tell what Bun reads.
-- A `cosmiconfig` key in the root `package.json`, which commitlint's config loader reads ([Safety](#safety)).
 - Anything under `vendor/`, which go builds from in place of the module cache when no `-mod` flag is set.
 - A workflow whose extension is anything but `.yml`, the one spelling actionlint's list and zizmor's collection
   both match.
-- An inline `zizmor: ignore[...]` comment anywhere under `.github`. A waiver lives in the rules of
-  `.github/zizmor.yml`, with the file it covers. The `workflows` job refuses one too, but its search skips a file
-  `.gitattributes` marks binary, and the gate reads every file itself.
+- A composite action, an `action.yml` or `action.yaml` in any case, anywhere but under `.github/actions/` in that
+  spelling. A workflow's `uses: ./<path>` runs an action from any path, and zizmor reads `.github` alone, so an
+  action elsewhere, `.GitHub` or an 8.3 short name such as `GITHUB~1` included, runs with no audit. Under
+  `.github/actions/`, the name passes in exact spelling alone. zizmor collects `action.yml` and `action.yaml`, and a
+  case-insensitive runner opens an `ACTION.YML` that zizmor never reads.
 - A `replace`, `godebug` or `ignore` line in `go.mod`. An `ignore` line takes its directories out of every `./...`
   row.
 
 It refuses a root `.config` in any case and any form, committed or not, because mise, the dotnet tool manifest,
-cosmiconfig's meta config and lefthook all read configs from it. It refuses a root `package.yaml` the same way,
-since cosmiconfig reads a meta config there too. It refuses a root `vendor` on disk, which go builds from unless a
-`-mod` flag says otherwise, while CI's gate sets `-mod=readonly`.
+cosmiconfig's meta config and lefthook all read configs from it. It refuses a root `vendor` on disk, which go builds
+from unless a `-mod` flag says otherwise, while CI's gate sets `-mod=readonly`.
 
 Every program the gate starts that searches for its own config runs with one config named: `.prettierrc` (with
 `.prettierignore` and no `.editorconfig`), `.golangci.yml`, `.taplo.toml`, `.github/zizmor.yml` and
@@ -433,8 +459,8 @@ outside the repository.
 
 ## Commit messages
 
-Every commit follows [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/). commitlint checks the
-message in the commit hook and again in CI, over the pull request's commits and its title.
+Every commit follows [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/). commitlint checks
+the message in the commit hook and again in CI, over the pull request's commits and its title.
 
 ```text
 type(scope): subject
@@ -443,98 +469,130 @@ body
 ```
 
 The type is one of those `@commitlint/config-conventional` accepts, and it names the change's effect on the people
-who run the binary. `feat`, `fix`, `perf` and `revert` reach the changelog, and every other type stays out of it,
-`build` included. `changelog-sections` in `release-please-config.json` holds that split, so a change to it changes
-this paragraph in the same commit. A change to the gate, a hook or the tools `mise.toml` pins is `chore`, and a
-change to this repository's workflows is `ci`. A dependency linked into the binary is `fix(deps)`, and one that
-only builds, checks or tests is `chore(deps)`. A document is `docs`, because readers reach it from the default
-branch. A revert is written `revert(<scope>): <what it undoes, in fresh words>`, with a `Refs: <sha>` footer for
-each reverted commit. commitlint skips git's `Revert "..."` subject, and release-please cannot parse it. Repeating
-the reverted header after `revert: ` can pass the 72-character limit.
+who use what this repository ships. A change they feel takes a type the changelog shows, and a change only this
+repository's contributors feel is `chore` or `ci`, which it hides. `changelog-sections` in
+`release-please-config.json` is the list ([Releases](#releases)).
 
-A template's users are the repositories created from it or aligned to it. So in this template a change to a file a
-clone copies, `CONTRIBUTING.md` and the other copied documents included, is `feat` or `fix`, and the changelog lists
-what an aligning repository must copy. A pin bump stays `chore`, because each clone's own Renovate moves its pins.
-A document no clone copies stays `docs`.
+<!-- TODO(kickstart): replace the paragraph below with who uses what your repository ships and which changes reach
+them, from the handbook's Commits section. -->
 
-<!-- TODO(kickstart): delete the paragraph above; your repository is not a template. -->
+This repository is a template, so its users are the repositories created from it or aligned to it. A change to a
+file a clone copies is `feat` or `fix`, with that file's scope, workflows and gate files included. Documents follow
+the same rule: a change to one a clone copies, such as `CONTRIBUTING.md` or `SECURITY.md`, is `feat` or `fix`, and
+a document no clone copies stays `docs`. A pin bump stays `chore`, because each clone's own Renovate moves its
+pins.
 
-The scope is optional. `.github/commit-scopes.json` lists each scope and what it covers, and commitlint accepts no
-other. Omit the scope rather than invent one. A new part of the repository earns a scope in that file, in the
-change that adds the part. A scope never repeats the type: `docs(docs)`, `ci(ci)` and `test(tests)` take the bare
-type, `docs:`, `ci:` and `test:`. A reviewer holds that rule.
+The scope is optional. `.github/commit-scopes.json` lists each scope and what it covers, and commitlint accepts
+no other. Omit the scope rather than invent one. A scope never repeats the type: `docs(docs)`, `ci(ci)` and
+`test(tests)` take the bare type, `docs:`, `ci:` and `test:`. A new part of the repository earns a scope in that
+file, in the change that adds the part.
 
-The header and every body line stay within 72 characters. The header's limit applies to what lands on `main`,
-because github.com cuts a subject at 73. A pull request merges by squash, the one method the repository allows,
-under GitHub's default text. A one-commit pull request lands its commit's subject and body. A longer one lands its
-title, with each commit as a bullet in the body. Either subject gets ` (#N)` appended, so the title, or a lone
-commit's subject, stays within 64 to 67 characters, as the number's digits allow. The commit hook checks 72 as
-written. CI's `commits` job lints every commit, and the title or a lone commit's subject with ` (#N)` appended. A
-Dependabot pull request whose landed header runs past 72 fails that lint and is closed, and the bump is taken by
-hand.
+The header and every body line stay within 72 characters, and the header limit applies to what lands on `main`. A
+pull request merges by squash, the one method the repository allows. A one-commit pull request lands its commit's
+subject and body, and a longer one lands its title and each commit as a bullet. Either subject lands with ` (#N)`
+appended, and CI's commits job lints the title, or a one-commit pull request's subject, with that suffix on. So a
+title or subject holds 67 characters while pull request numbers have one digit, and 64 once they have four. A
+Dependabot pull request, in a repository that runs Dependabot, whose landed header runs past 72 characters fails
+that lint: it is closed, and the bump is taken by hand. A body paragraph never opens with a bare type, because
+release-please reads it as a second change.
 
 A pull request's title takes the type of its most user-facing commit, and `!` when any commit breaks something
-users see. A squash of several commits lands the title alone, and release-please reads nothing else, so a title
-without the `!` loses the break and its bump. If a merged title hid a user-facing change, put the corrected headers
-between `BEGIN_COMMIT_OVERRIDE` and `END_COMMIT_OVERRIDE` in the merged pull request's description before the
-release pull request merges. release-please reads them in place of the landed message.
+users see. A squash of several commits lands the title alone, so a type or a break the title leaves out is lost,
+and a lost `!` loses the version bump the break cuts. A squash whose title hid a user-facing change is corrected
+before the release pull request merges, with an override in the merged pull request's description that
+release-please reads in place of the landed message:
+
+```text
+BEGIN_COMMIT_OVERRIDE
+feat(scope): the subject that should have landed (#NNN)
+END_COMMIT_OVERRIDE
+```
+
+A revert says in fresh words what it undoes, and a `Refs:` footer names each reverted commit:
+
+```text
+revert(scope): what is undone
+
+Refs: <sha>
+```
+
+A reverted header repeated after `revert: ` can pass the 72-character limit. commitlint skips git's `Revert "..."`
+subject, and release-please cannot parse it.
 
 A body carries what the diff cannot show: what was wrong, what the change does now, and what was left undone. A
-breaking change carries `!` after the type or scope and explains the break in the body. `!` marks a break users
-see. A break only contributors see, such as a renamed task, carries none, because `!` cuts a release whatever the
-type.
+break users see carries `!` after the type or scope and explains the break in the body. A break only contributors
+see carries neither `!` nor a `BREAKING CHANGE:` footer, because either cuts a release.
 
-Every version heading in `CHANGELOG.md` links GitHub's compare view from the previous tag, which lists every change
-in the release, hidden types included. `git log --oneline v<previous>..v<version>` lists the same.
+Every version heading in `CHANGELOG.md` links GitHub's compare view from the previous tag, which lists every
+change in the release, hidden types included. The same list locally:
+
+```sh
+git log --oneline v<previous>..v<version>
+```
+
+A first release has no previous tag, and `git log --oneline v<version>` lists it.
 
 ## Dependencies
 
 Every dependency is pinned to an exact version and moved by Renovate under a three-day cooldown, from the presets
-`.github/renovate.json` extends. Renovate is the only bot that opens pull requests. A security fix comes from a
-Dependabot alert and skips the schedule and the cooldown. `go.mod` names every module, direct and indirect, so
-Renovate fixes an indirect one too.
+`.github/renovate.json` extends. Renovate is the only bot that opens pull requests. Go has no cooldown file of its
+own, so nothing in this repository gates what `go get` or `go mod tidy` resolve by hand. The cooldown is also in
+`bunfig.toml`, because Renovate's lock file maintenance runs `bun install` in a container with no other
+configuration, and that file is the one cooldown the run observes.
 
-Go has no cooldown file of its own, so nothing in this repository gates what `go get` or `go mod tidy` resolve by
-hand. The cooldown is Renovate's. Bun's is in `bunfig.toml` as well, so a lock file refresh in a container observes
-it.
+The advisory legs:
+
+- The `dependency-review` check blocks a pull request on what it adds against its base, and a release pull
+  request on what the release adds against the last tag, at high severity. It reads `go.mod` and `go.sum` in full,
+  the modules behind the `tool` directives included, the direct packages `package.json` names and the actions the
+  workflows pin, and nothing under `bun.lock`.
+- `govulncheck` runs in the gate over the module and over its `tool` directives, and blocks only on a call either
+  one reaches. A reachable advisory in a tool's tree with no fixed version is held one of two ways until a fix
+  ships: pin that tool back to a release without the vulnerable module, or take `go tool govulncheck tool` out of
+  the `vulncheck` task with a dated comment there naming the advisory.
+- The `audit` workflow runs `bun run audit` over the whole of `bun.lock`, transitives included, once a day as a
+  report. It never blocks a merge. A red run is work to pick up. Its `workflows` job runs zizmor's online audits of
+  every pinned action with no pull request open.
+- Dependabot alerts stay on and its security updates stay off. Renovate opens the fix for a direct dependency and
+  for an indirect Go module, since `go.mod` names it. A transitive Bun advisory is fixed by hand from the alert with
+  `bun audit fix`, because no bot fixes one.
+
+The `audit` script in `package.json` is the one home of the audit's level and its waivers. It runs `bun audit` at
+`--audit-level=high`. A waived advisory is an `--ignore <id>` on that script, and this section names each one with
+its reason and the condition that removes it. None is waived.
 
 A hand pin ahead of the cooldown records its audit in the commit body: the release notes read, the maintainer
-checked, the diff against the previous version. A waived advisory is an `allow-ghsas` entry in `ci.yml`'s
-`dependency-review` job, with a comment naming the advisory, what it blocks, why shipping is safer and the
-condition that removes it. A red advisory check blocks the merge, because the required checks sit in a ruleset
-with no bypass actor.
-
-The `dependency-review` job compares the pull request's modules against its base through GitHub's dependency
-graph, which reads `go.mod` and `go.sum` in full, direct and indirect modules alike, including the modules behind
-the `tool` directives. Under Bun it sees the direct packages `package.json` names alone. It blocks on a high or
-critical advisory in what the pull request adds. `govulncheck` runs in the gate beside it, over the module and over its
-`tool` directives, and blocks only on a call either one reaches. A reachable advisory in a tool's tree with no fixed
-version is held one of two ways until a fix ships: pin that tool back to a release without the vulnerable module,
-or take `go tool govulncheck tool` out of the `vulncheck` task with a dated comment there naming the advisory.
-
-`audit.yml` is the scheduled report, on one daily clock, and a red run is a report, never a check. Its `audit` job
-runs `bun run audit`, the `package.json` script `bun audit --audit-level=high`, over every package `bun.lock` names,
-transitives included. `bun.lock` holds commitlint, Prettier and the `yaml` package commitlint's config reads,
-tooling that ships in nothing, and no bot opens a pull request for a transitive advisory there. The script is the
-one home for a `--ignore` waiver. Its `workflows` job calls the reusable `workflows` workflow, so zizmor's online
-audits of every pinned action run with no pull request open. Go's whole-tree reader is `govulncheck`, and it runs
-in the gate on every push and pull request rather than on a clock.
+checked, the diff against the previous version. A waived advisory in the pull request check is an `allow-ghsas`
+entry on `ci.yml`'s `dependency-review` job, with a comment naming the advisory, what it blocks, why shipping is
+safer and the condition that removes it. A red advisory check blocks the merge like every required check
+([What never happens](#what-never-happens)).
 
 ### Tool integrity
 
-Each tool the gate runs, and how its bytes are held to their source. Four tiers: provenance, a checksum in a pinned
-tree, a checksum recorded by a third party, a version alone.
+Each tool this repository pins, and who vouches for its bytes. The publisher's build attestation is a statement a
+workflow in the publisher's repository signed over the artifact's digest. The publisher's signature is made with a
+key the checking tool carries. The registry's record is a hash, or a signature, from a registry that never replaces
+a published version. The release's own checksum is GitHub's digest for the asset, or a checksum file beside it, in
+a release that can still change. A hash this repository computed comes from one download, and nothing outside the
+file that pins it records it. A version alone names a release, and nothing recorded before the install vouches for
+its bytes. Setup names the programs you install yourself, and the copy you install takes no tier. A program in
+Setup that CI installs at a pinned version takes a line for that copy.
 
-- actionlint and zizmor: provenance. `mise.lock` records `github-attestations`, mise verifies the attestation on
-  every install, and the gate refuses a lockfile that drops the line.
-- ShellCheck and taplo: a checksum in a pinned tree, `mise.lock`. taplo's checksums are the sha256 of its release
-  artifacts, computed once from a download, as `mise.toml` records.
-- golangci-lint, govulncheck, task, lefthook, go-test-coverage, testpair and deadcode: a checksum in a pinned tree,
-  `go.sum`, checked against the checksum database on every build.
-- Prettier, commitlint and `yaml`: a checksum in a pinned tree, `bun.lock`.
-- Go and Bun themselves: a version alone. The pin file plus the cooldown is the control, because the setup actions
-  verify no download.
-- mise itself: a publisher signature, which `jdx/mise-action` checks against the release's signed checksums.
+- actionlint and zizmor: the publisher's build attestation, in `mise.lock`. The lockfile records
+  `github-attestations`, mise checks the attestation on every install, and the gate refuses a lockfile that drops
+  the line.
+- mise itself, in CI: the publisher's signature, on `jdx/mise-action`'s `version:` line in `ci.yml`. The action
+  checks the release's signed checksums.
+- golangci-lint, govulncheck, task, lefthook, go-test-coverage, testpair and deadcode: the registry's record, in
+  `go.sum`, from Go's checksum database. go checks a module against `go.sum` when it downloads it, and the database
+  answers only for a hash `go.sum` lacks. For a module already in the module cache, go compares `go.sum` with the
+  hash recorded at its download and does not hash its files again.
+- Prettier, commitlint and `yaml`: the registry's record, in `bun.lock`.
+- ShellCheck: the release's own checksum, in `mise.lock`.
+- taplo: a hash this repository computed, in `mise.lock`. Its checksums are the sha256 of its release artifacts,
+  computed once from a download, as `mise.toml` records.
+- Go and Bun themselves: a version alone, in `go.mod` and in `package.json`'s `packageManager`. The pin plus the
+  cooldown is the control, because the setup actions check no download.
 
 For every mise tool, `internal/tools/gate/pins.go` holds the pin and the lockfile's version to the tool's release
 shape, `major.minor.patch` in ASCII digits, before it builds any url from them. It holds each lockfile `url`, byte
@@ -558,55 +616,71 @@ mise merges every config file it finds, each with its sibling lockfile, so a `mi
 
 ## Releases
 
-release-please opens one release pull request from the commits on `main` and keeps it current. Merging it tags the
-merge commit `v<version>` and creates a draft release. The same run builds the binaries and their `SHA256SUMS` with
-`go tool task release`, attests every file, attaches them to the draft, and flips it public after the approval the
-`release` environment holds. [docs/install.md#check-the-download](docs/install.md#check-the-download) names both
-checks a user runs.
+release-please opens one release pull request from the commits on `main` and keeps it current. Merging it tags
+the merge commit `v<version>` and creates a draft release. The same run builds the binaries and their
+`SHA256SUMS` with `go tool task release` and attests every file. The `publish` job in `cd.yml` then attaches them,
+waits for the `release` environment's reviewer and flips the draft public. A draft nobody approves ships nothing,
+and a failed release is recovered by cutting the next version.
+[docs/install.md#check-the-download](docs/install.md#check-the-download) names both checks a user runs.
 
-[Commit messages](#commit-messages) names the types that reach the changelog. release-please owns `CHANGELOG.md`
-and `.release-please-manifest.json`.
+The types that appear in the changelog are the keys under `changelog-sections` in `release-please-config.json`,
+which is the one place that list lives. A visible type cuts a release on its own. release-please owns
+`CHANGELOG.md` and `.release-please-manifest.json`.
+
+`initial-version` in the same file sets the first release. `bump-minor-pre-major` makes a breaking change a minor
+bump below `1.0.0`, so the changelog carries the break.
 
 ## Troubleshooting
 
 A local run that fails or disagrees with CI:
 
-- A stale or missing install. The format row refuses to start with no Prettier in `node_modules/.bin` and names
-  the install to run. A stale one runs the version it holds, which can disagree with the one `bun.lock` pins, and
-  CI installs frozen before its gate. Run `bun install --frozen-lockfile` after every pull, after every branch
-  switch and in every worktree ([Setup](#setup)).
-- The other copy `bunx` may run. With no copy in this checkout's `node_modules/.bin`, the commit hook's `bunx`
-  runs commitlint from a parent directory's `node_modules/.bin`, from `PATH` or from its own cache, none of them the
-  version `bun.lock` pins. The hook does not check. Install, and the hook runs the pinned copy again.
-- A package `bun.lock` no longer names. `bun install --frozen-lockfile` does not prune it, so a stale
-  `node_modules/` keeps a package CI never installs. After a dependency removal, delete `node_modules/` and install
-  again.
-- An env file. `bunx` ignores `--no-env-file`, so an untracked `.env`, `.env.local` or another name Bun loads from
-  the root reaches Prettier and commitlint, and a variable there can change their results. `Taskfile.yml` loads
-  `.env` into every task as well. CI has none of them. Move the file aside to run what CI runs
+- A row that says a tool "is not installed in this checkout", or a hook that cannot find its tool, means a missing
+  install. Run `bun install --frozen-lockfile`, or add `--ignore-scripts` in a worktree ([Setup](#setup)).
+- A stale install runs another version. When `node_modules/.bin` holds a tool at the wrong version, the format
+  row's check passes and `bun x` runs that copy. The commit hook checks nothing before its start, so when the
+  checkout holds none, its `bun x` runs a copy from a parent directory, `PATH` or its own cache and can report
+  green. Run `bun install --frozen-lockfile` after every pull, every branch switch and in each worktree
+  ([Setup](#setup)).
+- `bun install --frozen-lockfile` does not remove a package `bun.lock` no longer names, so a stale `node_modules/`
+  keeps a package CI never installs. After a pull that drops a dependency, delete `node_modules/` and install again.
+- A personal env file reaches Prettier and commitlint alike, since `bun x` ignores `--no-env-file`, and
+  `Taskfile.yml` loads `.env` into every task. A value there can turn a row red locally alone. Move the file aside
+  and run again ([Safety](#safety)).
+- A local gate can pass where CI's `commits` or `workflows` job fails, since those jobs refuse files the gate does
+  not repeat ([The gate](#the-gate)).
+- A `workflows` row that differs from CI can come from zizmor's online audits. They run on your machine when gh
+  answers with a token and never in CI's gate job. `ZIZMOR_OFFLINE=1` does not reach zizmor, so take gh off `PATH`
+  to run what CI runs.
+- In a checkout another account owns, git refuses the repository as dubious ownership, and the gate stops. Make
+  your account the directory's owner. The gate starts git with no system or global config, so it reads no
+  `safe.directory` entry, by design.
+- A row that fails five seconds after its tool exits, because a process the tool started still holds the tool's
+  output. That process runs on, since nothing the gate can reach ends a process whose parent is gone. Find it and
+  end it.
+- On a case-insensitive checkout, on Windows or macOS, a case variant of a tracked path can merge two tracked paths
+  into one file, and on Windows so can an 8.3 short name, such as `GITHUB~1` for `.github` or `packag~1.jso` for
+  `package.json`. git warns of a collision. Your local gate then reads a file the diff does not show, while the
+  shared jobs on Linux read the real files. Read a pull request's diff before you run its branch
   ([Safety](#safety)).
-- zizmor's online audits. They run on your machine when gh answers with a token and never in CI's gate job
-  ([The gate](#the-gate)). `ZIZMOR_OFFLINE=1` does not reach zizmor, so take gh off `PATH` to run what CI runs.
-- A checkout another account owns: a devcontainer volume, a network share, or a directory another user created.
-  git refuses it with "detected dubious ownership", and the gate stops. git's own remedy, a `safe.directory` entry,
-  sits in the global config the gate never reads, by design. Clone the checkout as the account that runs the gate,
-  or have that account take ownership of it.
-- A row that fails five seconds after its tool exits, because a process the tool started still holds its output.
-  That process runs on, so find it and end it.
 - A race row that prints that it did not run. The machine has no C compiler on `PATH` ([Setup](#setup)).
+- A test row that fails on a skip count other than the one declared. A missing prerequisite shows as a skip past
+  the count: no `git` or `sh` on `PATH`, a `git` older than Setup names, or on Windows no right to create a symbolic
+  link ([Setup](#setup)). The finding names each test that skipped.
 
 ## What never happens
 
-- Nobody hand-edits `CHANGELOG.md` or `.release-please-manifest.json`. release-please writes both from the commits,
-  and a hand edit is overwritten or, worse, shifts the next version it computes. The one exception is the template
-  reset. A repository created from this template deletes `CHANGELOG.md` and writes `{}` into the manifest once,
-  before its first release. The directive above `release-pr` in `.github/workflows/cd.yml` carries it until the
-  clone absorbs the template. The go release type keeps no version file, so those two files are the whole reset.
-- No `mise.lock` line is written outside `mise lock`. The lockfile is what an install fetches and compares, and the
-  gate holds it to the expectations in `internal/tools/gate/pins.go`. A hand-written line is a line nothing
-  verified.
-- Nothing merges past a red gate. The gate is the one check between a change and a release. The required checks
-  and the code scanning verdict sit in a ruleset with no bypass actor.
+- Nobody hand-edits `CHANGELOG.md` or `.release-please-manifest.json`. release-please writes both from the
+  commits, and a hand edit is overwritten or, worse, shifts the next version it computes. The one exception is the
+  reset the template marker in `.github/workflows/cd.yml` orders, made once, before a repository created from this
+  template releases for the first time.
+- No `mise.lock` line is written outside `mise lock`, except a checksum computed as `mise.toml` says. The lockfile
+  is what an install fetches and compares, and the gate holds it to the expectations in
+  `internal/tools/gate/pins.go`. A hand-written line is a line nothing verified.
+- Nothing merges past a red gate. The required checks and the code-scanning rule sit in a ruleset with no bypass
+  actor.
 - No version number goes into prose. A version lives in the file that pins it, so a bump is one edit and no
   document goes stale.
+- No workflow runs a check a contributor cannot run. CI calls the gate, and the steps before it run
+  `scripts/go-mod-check.sh` and `gate pins`, as the push hook does. A check that cannot run locally sits in `ci.yml`
+  with a comment saying why.
 - No `Makefile`. `Taskfile.yml` is the runner, and every command CI runs is a task a contributor runs.

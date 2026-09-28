@@ -77,7 +77,6 @@ var rootRefused = []struct {
 }{
 	{name: ".config", reads: "mise, the dotnet tool manifest, cosmiconfig's meta config and lefthook all read configs from it"},
 	{name: vendor, reads: "go builds from it in place of the module cache unless a -mod flag says otherwise, and CI's gate sets -mod=readonly, so a local gate would check other code"},
-	{name: "package.yaml", reads: "cosmiconfig reads a " + metaConfigKey + " key in it as commitlint's meta config whatever config commitlint names, and an $import there runs a module"},
 }
 
 // ///////////////////////////////////////////////
@@ -86,12 +85,12 @@ var rootRefused = []struct {
 
 // treeFindings refuses what the checkout can carry past mise.toml and
 // mise.lock: another mise config or lock file, a link where mise looks for
-// one, an entry the root may not hold (rootFindings), a tracked file a
-// program reads before any check that the shared commits job leaves to the
-// gate (startupFindings), a config the gate names no program to read,
+// one, an entry the root may not hold (rootFindings), a tracked vendor
+// directory (startupFindings), a config the gate names no program to read,
 // tracked or on disk (searchFindings), a go.mod directive that reaches the
 // gate's own build or narrows ./... (goModFindings), and a workflow the
-// workflows rows would skip or an inline zizmor waiver (walkedFindings).
+// workflows rows would skip or a composite action outside .github/actions
+// (walkedFindings).
 func treeFindings(dir string, tracked trackedLister) ([]string, error) {
 	found, err := configFindings(dir)
 	if err != nil {
@@ -111,11 +110,7 @@ func treeFindings(dir string, tracked trackedLister) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("listing tracked files: %w", err)
 	}
-	startup, err := startupFindings(dir, paths)
-	if err != nil {
-		return nil, err
-	}
-	found = append(found, startup...)
+	found = append(found, startupFindings(paths)...)
 	searched, err := searchFindings(dir, paths)
 	if err != nil {
 		return nil, err
@@ -126,11 +121,7 @@ func treeFindings(dir string, tracked trackedLister) ([]string, error) {
 		return nil, err
 	}
 	found = append(found, module...)
-	walked, err := walkedFindings(dir, paths)
-	if err != nil {
-		return nil, err
-	}
-	return append(found, walked...), nil
+	return append(found, walkedFindings(paths)...), nil
 }
 
 // configFindings refuses every mise configuration or lock file under dir

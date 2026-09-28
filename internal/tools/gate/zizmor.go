@@ -12,7 +12,7 @@ import (
 // Constants
 // ///////////////////////////////////////////////
 
-// zizmorCompleted comes before the path on the line zizmor 1.30.1 logs at info
+// zizmorCompleted comes before the path on the line the pinned zizmor logs at info
 // once it has audited a file. The path carries the platform's separator.
 const zizmorCompleted = "completed "
 

@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -41,6 +42,27 @@ func TestRun_Usage(t *testing.T) {
 	}
 }
 
+// TestRun_Tests drives the dispatch through the tests row, which must hold a
+// run to the skip count the platform the gate runs on declares.
+func TestRun_Tests(t *testing.T) {
+	declared := declaredSkips[runtime.GOOS]
+	tests := []struct {
+		name     string
+		skipped  int
+		wantCode int
+	}{
+		{name: "this platform's declared count passes", skipped: declared, wantCode: 0},
+		{name: "one skip past it fails", skipped: declared + 1, wantCode: 1},
+		{name: "one skip short of it fails", skipped: max(declared-1, 0), wantCode: min(declared, 1)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			assert.Equal(t, tt.wantCode, run(t.Context(), []string{"tests"}, strings.NewReader(skips(tt.skipped)), &stdout, &stderr), "stderr: %s", stderr.String())
+		})
+	}
+}
+
 // intactCheckout makes a git repository holding the intact mise pair and
 // startup files, none of them tracked, makes it the working directory, and
 // returns it with the git it found.
@@ -62,10 +84,9 @@ func intactCheckout(t *testing.T) (string, string) {
 
 // TestRun_Pins drives the dispatch through the pins subcommand, which reads
 // the files from the working directory and asks git what it tracks there.
-// The env cases plant what a committed env file could set to hide itself, and
-// each case variant names a file a case-insensitive filesystem opens as the
-// refused one. A tracked env file at the root is the shared commits job's to
-// refuse, so the gate refuses the one below it.
+// The vendor cases plant a variable a committed .env could set to hide a
+// tracked file, and a case variant a case-insensitive filesystem opens as the
+// refused name.
 func TestRun_Pins(t *testing.T) {
 	dir, git := intactCheckout(t)
 	gitRun := func(args ...string) {
@@ -85,29 +106,19 @@ func TestRun_Pins(t *testing.T) {
 
 	t.Run("an intact checkout holds", func(t *testing.T) { pins(t, 0, "") })
 
-	nested := filepath.Join(dir, "docs", ".env")
-	require.NoError(t, os.MkdirAll(filepath.Dir(nested), 0o700))
-	require.NoError(t, os.WriteFile(nested, []byte("GIT_INDEX_FILE=.git/no-such-index\n"), 0o600))
-	t.Run("an untracked env file is the contributor's own", func(t *testing.T) { pins(t, 0, "") })
-
-	gitRun("add", "--force", "docs/.env")
-	t.Run("a tracked env file below the root exits 1 and names it", func(t *testing.T) { pins(t, 1, `"docs/.env" is tracked`) })
-	t.Run("a tracked env file that sets GIT_INDEX_FILE still exits 1", func(t *testing.T) {
+	vendored := filepath.Join(dir, "Vendor", "modules.txt")
+	require.NoError(t, os.MkdirAll(filepath.Dir(vendored), 0o700))
+	require.NoError(t, os.WriteFile(vendored, []byte("# probe\n"), 0o600))
+	gitRun("add", "--force", "Vendor/modules.txt")
+	require.NoError(t, os.RemoveAll(filepath.Join(dir, "Vendor")))
+	t.Run("a tracked vendor path exits 1 and names it", func(t *testing.T) {
+		pins(t, 1, `"Vendor/modules.txt" is tracked under vendor`)
+	})
+	t.Run("a tracked vendor path still exits 1 under a GIT_INDEX_FILE a .env could set", func(t *testing.T) {
 		t.Setenv("GIT_INDEX_FILE", filepath.Join(dir, ".git", "no-such-index"))
-		pins(t, 1, `"docs/.env" is tracked`)
+		pins(t, 1, `"Vendor/modules.txt" is tracked under vendor`)
 	})
-	gitRun("rm", "--cached", "--quiet", "docs/.env")
-	require.NoError(t, os.RemoveAll(filepath.Join(dir, "docs")))
-
-	upper := filepath.Join(dir, "docs", ".ENV.LOCAL")
-	require.NoError(t, os.MkdirAll(filepath.Dir(upper), 0o700))
-	require.NoError(t, os.WriteFile(upper, []byte("PROBE=1\n"), 0o600))
-	gitRun("add", "--force", "docs/.ENV.LOCAL")
-	t.Run("a tracked case variant of an env file exits 1 and names it", func(t *testing.T) {
-		pins(t, 1, `"docs/.ENV.LOCAL" is tracked, and Bun loads a file of that name`)
-	})
-	gitRun("rm", "--cached", "--quiet", "docs/.ENV.LOCAL")
-	require.NoError(t, os.RemoveAll(filepath.Join(dir, "docs")))
+	gitRun("rm", "--cached", "--quiet", "Vendor/modules.txt")
 
 	config := filepath.Join(dir, ".github", "ActionLint.YAML")
 	require.NoError(t, os.MkdirAll(filepath.Dir(config), 0o700))
@@ -138,14 +149,46 @@ func TestRun_Pins(t *testing.T) {
 
 	workflow := filepath.Join(dir, ".github", "workflows", "ci.yaml")
 	require.NoError(t, os.MkdirAll(filepath.Dir(workflow), 0o700))
-	require.NoError(t, os.WriteFile(workflow, []byte("jobs: {} # zizmor: ignore[excessive-permissions]\n"), 0o600))
+	require.NoError(t, os.WriteFile(workflow, []byte("jobs: {}\n"), 0o600))
 	gitRun("add", "--force", ".github/workflows/ci.yaml")
-	t.Run("a workflow a row would skip exits 1 and names both reasons", func(t *testing.T) {
+	t.Run("a workflow a row would skip exits 1 and names it", func(t *testing.T) {
 		pins(t, 1, `".github/workflows/ci.yaml" is a workflow named .yaml`)
-		pins(t, 1, `".github/workflows/ci.yaml" carries an inline zizmor ignore comment`)
 	})
 	gitRun("rm", "--cached", "--quiet", ".github/workflows/ci.yaml")
 	require.NoError(t, os.RemoveAll(filepath.Join(dir, ".github")))
+
+	action := filepath.Join(dir, "tools", "x", "action.yml")
+	require.NoError(t, os.MkdirAll(filepath.Dir(action), 0o700))
+	require.NoError(t, os.WriteFile(action, []byte("runs:\n  using: composite\n  steps: []\n"), 0o600))
+	gitRun("add", "--force", "tools/x/action.yml")
+	t.Run("a composite action outside .github/actions exits 1 and names it", func(t *testing.T) {
+		pins(t, 1, `"tools/x/action.yml" is a composite action outside .github/actions/`)
+	})
+	gitRun("rm", "--cached", "--quiet", "tools/x/action.yml")
+	require.NoError(t, os.RemoveAll(filepath.Join(dir, "tools")))
+
+	for _, tt := range []struct {
+		name, path, wantIn string
+		wantCode           int
+	}{
+		{name: "a composite action under .github/actions in exact spelling holds", path: ".github/actions/ok/action.yml"},
+		{
+			name: "an action named ACTION.YML under .github/actions exits 1 and names the spelling to take", path: ".github/actions/upper/ACTION.YML", wantCode: 1,
+			wantIn: `".github/actions/upper/ACTION.YML" names a composite action in another case than action.yml, and zizmor, which collects that spelling alone, never audits it while a case-insensitive runner opens it for uses: ./. Rename it action.yml`,
+		},
+		{
+			name: "an action named Action.Yaml under .github/actions exits 1 and names the spelling to take", path: ".github/actions/mixed/Action.Yaml", wantCode: 1,
+			wantIn: `".github/actions/mixed/Action.Yaml" names a composite action in another case than action.yaml, and zizmor, which collects that spelling alone, never audits it while a case-insensitive runner opens it for uses: ./. Rename it action.yaml`,
+		},
+	} {
+		planted := filepath.Join(dir, filepath.FromSlash(tt.path))
+		require.NoError(t, os.MkdirAll(filepath.Dir(planted), 0o700))
+		require.NoError(t, os.WriteFile(planted, []byte("runs:\n  using: composite\n  steps: []\n"), 0o600))
+		gitRun("add", "--force", tt.path)
+		t.Run(tt.name, func(t *testing.T) { pins(t, tt.wantCode, tt.wantIn) })
+		gitRun("rm", "--cached", "--quiet", tt.path)
+		require.NoError(t, os.RemoveAll(filepath.Join(dir, ".github")))
+	}
 
 	tampered := []byte(intactLock()[:len(intactLock())-1])
 	require.NoError(t, os.WriteFile(filepath.Join(dir, lockPath), bytes.ReplaceAll(tampered, []byte("github-attestations"), []byte("none")), 0o600))
@@ -194,7 +237,7 @@ func TestRun_Walk(t *testing.T) {
 	t.Run("scripts prints what ShellCheck checked", func(t *testing.T) {
 		walkRow(t, []string{"scripts", shellcheck}, 0, "shellcheck checked 1 script file: scripts/build.sh", "")
 	})
-	t.Run("format refuses to start bunx before the install holds Prettier", func(t *testing.T) {
+	t.Run("format refuses to start bun x before the install holds Prettier", func(t *testing.T) {
 		t.Setenv("PATH", fakeProgramDir(t, "bun"))
 		walkRow(t, []string{"format"}, 2, "", "gate format: prettier is not installed in this checkout: run bun install --frozen-lockfile")
 	})
@@ -208,27 +251,22 @@ func TestRun_Walk(t *testing.T) {
 		t.Setenv("PATH", t.TempDir())
 		walkRow(t, []string{"format"}, 2, "", "gate format: finding bun on PATH")
 	})
+	gitOnly := gitOnlyDir(t, git)
 	t.Run("zizmor runs online when the gh on PATH answers", func(t *testing.T) {
-		t.Setenv("PATH", fakeProgramDir(t, "gh")+string(os.PathListSeparator)+filepath.Dir(git))
+		t.Setenv("PATH", fakeProgramDir(t, "gh")+string(os.PathListSeparator)+gitOnly)
 		t.Setenv("GATE_FAKE_GH", "")
 		walkRow(t, []string{"zizmor", zizmor}, 0, "zizmor ran online, since gh auth token answered, and completed 1 file: .github/workflows/ci.yml", "")
 	})
 	t.Run("zizmor runs offline with no gh on PATH", func(t *testing.T) {
-		t.Setenv("PATH", filepath.Dir(git))
-		if found, err := exec.LookPath("gh"); err == nil {
-			t.Skipf("gh sits beside git at %s, so this case would start it", found)
-		}
+		t.Setenv("PATH", gitOnly)
 		walkRow(t, []string{"zizmor", zizmor}, 0, "zizmor ran offline", "")
 	})
 	t.Run("packages prints the count go list gives", func(t *testing.T) {
-		t.Setenv("PATH", fakeProgramDir(t, "go")+string(os.PathListSeparator)+filepath.Dir(git))
+		t.Setenv("PATH", fakeProgramDir(t, "go")+string(os.PathListSeparator)+gitOnly)
 		walkRow(t, packages, 0, "go list ./... matched 2 packages, and the rows read linux/amd64 windows/amd64, each with no build tags", "")
 	})
 	t.Run("packages with no go on PATH is an error", func(t *testing.T) {
-		t.Setenv("PATH", filepath.Dir(git))
-		if found, err := exec.LookPath("go"); err == nil {
-			t.Skipf("go sits beside git at %s, so this case would start it", found)
-		}
+		t.Setenv("PATH", gitOnly)
 		walkRow(t, packages, 2, "", "gate packages: finding go on PATH")
 	})
 	t.Run("a row outside a repository is an error", func(t *testing.T) {
