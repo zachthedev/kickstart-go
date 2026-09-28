@@ -43,7 +43,7 @@ type lintCoverage struct {
 // Variables
 // ///////////////////////////////////////////////
 
-// laxMarkers are the texts golangci-lint 2.13.2 reads as a generated file's
+// laxMarkers are the texts the pinned golangci-lint reads as a generated file's
 // mark under `generated: lax`, which .golangci.yml sets because the header
 // cmd/generate writes is not the strict form. Any of them, lowercased, in a
 // comment the package-clause parse collects takes the file out of every

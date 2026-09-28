@@ -12,7 +12,7 @@ import (
 // Each case adds one directive to a go.mod, and the check must refuse
 // replace, godebug and ignore in either form, and pass everything else.
 func TestGoModFindings(t *testing.T) {
-	const base = "module example.com/probe\n\ngo 1.27.0\n\nrequire github.com/pelletier/go-toml/v2 v2.4.3\n"
+	const base = "module example.com/probe\n\ngo 1.25.0\n\nrequire github.com/pelletier/go-toml/v2 v2.4.3\n"
 	tests := []struct {
 		name   string
 		extra  string

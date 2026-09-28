@@ -229,7 +229,7 @@ func TestCoverageFindings(t *testing.T) {
 }
 
 // Each case plants one tracked Go file, and the check must refuse a lax
-// generated marker wherever golangci-lint 2.13.2 reads one, however it is
+// generated marker wherever the pinned golangci-lint reads one, however it is
 // disguised, pass one it never reads, and pass a file cmd/generate writes.
 func TestLaxMarkerFindings(t *testing.T) {
 	tests := []struct {

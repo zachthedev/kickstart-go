@@ -88,16 +88,16 @@ const (
 // starts leaves unwalked, Prettier's walk among them.
 var skippedDirs = []string{".git", ".sl", ".svn", ".hg", ".jj"}
 
-// lefthookNames are the main configs lefthook 2.1.14 reads from the root, the
-// first it finds. lefthook also reads .config, which the gate refuses whole.
+// lefthookNames are the main configs the pinned lefthook reads from the root,
+// the first it finds. lefthook also reads .config, which the gate refuses whole.
 var lefthookNames = withExtensions([]string{"lefthook", ".lefthook"}, ".yml", ".yaml", ".json", ".jsonc", ".toml")
 
-// lefthookLocalNames are the local configs lefthook 2.1.14 reads from the
+// lefthookLocalNames are the local configs the pinned lefthook reads from the
 // root and merges over the main one: a contributor's own override, which
 // .gitignore names.
 var lefthookLocalNames = withExtensions([]string{"lefthook-local", ".lefthook-local"}, ".yml", ".yaml", ".json", ".jsonc", ".toml")
 
-// taskNames are the Taskfiles Task 3.53.1 looks for, first found first, and
+// taskNames are the Taskfiles the pinned Task looks for, first found first, and
 // the .taskrc files it reads its own settings from.
 var taskNames = []string{
 	"Taskfile.yml", "taskfile.yml", "Taskfile.yaml", "taskfile.yaml",

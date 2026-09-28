@@ -60,7 +60,7 @@ var blankCodePoints = []struct {
 }
 
 // Each case is one comment as the parser hands it over, markers included. The
-// check must refuse every waiver golangci-lint 2.13.2 honors that nolintlint
+// check must refuse every waiver the pinned golangci-lint honors that nolintlint
 // never reads or cannot hold to a named rule, and pass every waiver the
 // linters check and every comment that is no waiver at all.
 func TestWaiverRefusal(t *testing.T) {

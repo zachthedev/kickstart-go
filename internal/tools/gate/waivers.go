@@ -21,7 +21,7 @@ import (
 // ///////////////////////////////////////////////
 
 const (
-	// gosecDisable is the second spelling of gosec's waiver. gosec 2.28.0 reads
+	// gosecDisable is the second spelling of gosec's waiver. The pinned gosec reads
 	// it where a // comment opens with it, alone or before a space, under the
 	// same rule and reason settings as #nosec (analyzer.go, findNoSecDirective).
 	gosecDisable = "gosec:disable"
@@ -37,7 +37,7 @@ const (
 // Variables
 // ///////////////////////////////////////////////
 
-// nolintDirective matches what golangci-lint 2.13.2's nolint filter reads as
+// nolintDirective matches what the pinned golangci-lint's nolint filter reads as
 // a directive once it strips every leading slash and space from a comment
 // (pkg/result/processors/nolint_filter.go).
 var nolintDirective = regexp.MustCompile(`^nolint( |:|$)`)

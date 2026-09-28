@@ -33,7 +33,7 @@ var trackedTree = []string{".github/workflows/ci.yml", ".github/workflows/cd.yml
 
 // fakeZizmorRunner plays zizmor: it checks the command line and environment
 // the row builds, for the mode it expects, and answers with a completed line
-// for each file, as zizmor 1.30.1 logs them. The row runs zizmor once.
+// for each file, as the pinned zizmor logs them. The row runs zizmor once.
 func fakeZizmorRunner(t *testing.T, online bool, answers zizmorAnswers) commandRunner {
 	t.Helper()
 	runs := 0
@@ -216,7 +216,7 @@ func fakeGhProgram(stdout, stderr io.Writer) int {
 }
 
 // fakeZizmorProgram logs a completed line for each file in .github/workflows,
-// with the platform's separator, as zizmor 1.30.1 does, and exits 0.
+// with the platform's separator, as the pinned zizmor does, and exits 0.
 func fakeZizmorProgram(stderr io.Writer) int {
 	entries, _ := os.ReadDir(filepath.FromSlash(workflowsDir))
 	for _, entry := range entries {

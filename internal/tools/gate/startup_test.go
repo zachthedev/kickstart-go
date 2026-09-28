@@ -18,7 +18,7 @@ const bunfig = "bunfig.toml"
 const intactBunfig = "[install]\nminimumReleaseAge = 259200 # 3 days\n"
 
 // intactGoMod is a go.mod carrying no directive the gate refuses.
-const intactGoMod = "module example.com/probe\n\ngo 1.27.0\n"
+const intactGoMod = "module example.com/probe\n\ngo 1.25.0\n"
 
 // writeStartupFiles writes the intact bunfig.toml and a go.mod into dir.
 func writeStartupFiles(t *testing.T, dir string) {

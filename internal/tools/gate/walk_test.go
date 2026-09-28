@@ -48,7 +48,7 @@ func writeFiles(t *testing.T, root string, names ...string) {
 	}
 }
 
-// taploLog is taplo 0.10.0's found files line over the named files under
+// taploLog is the pinned taplo's found files line over the named files under
 // root, spelled as taplo spells them.
 func taploLog(root string, names ...string) string {
 	var quoted []string

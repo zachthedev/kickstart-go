@@ -82,7 +82,7 @@ func fakeGit(stderr io.Writer) int {
 	return 128
 }
 
-// fakeTaplo logs taplo 0.10.0's found files line for every file after -- that
+// fakeTaplo logs the pinned taplo's found files line for every file after -- that
 // exists, as absolute paths with forward slashes, and exits 0 as taplo does
 // whatever it found.
 func fakeTaplo(stderr io.Writer, args []string) int {

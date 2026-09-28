@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// checkstyleFor is ShellCheck 0.11.0's checkstyle report naming each file,
+// checkstyleFor is the pinned ShellCheck's checkstyle report naming each file,
 // with the SC2016 finding it gives scripts/build.sh when finding is set.
 func checkstyleFor(files []string, finding bool) []byte {
 	report := "<?xml version='1.0' encoding='UTF-8'?>\n<checkstyle version='4.3'>\n"

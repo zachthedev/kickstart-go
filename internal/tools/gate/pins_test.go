@@ -12,10 +12,10 @@ import (
 )
 
 const intactPins = `[tools]
-actionlint = "1.7.12"
-shellcheck = "0.11.0"
-taplo = "0.10.0"
-zizmor = "1.30.1"
+actionlint = "1.6.26"
+shellcheck = "0.10.3"
+taplo = "0.9.8"
+zizmor = "1.22.0"
 
 [tool_config]
 locked = true
@@ -40,18 +40,18 @@ var intactEntries = []struct {
 	key, version, backend, platform, url, api string
 	attested                                  bool
 }{
-	{"actionlint", "1.7.12", "aqua:rhysd/actionlint", "linux-x64", "https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz", "https://api.github.com/repos/rhysd/actionlint/releases/assets/384924896", true},
-	{"actionlint", "1.7.12", "aqua:rhysd/actionlint", "macos-arm64", "https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_darwin_arm64.tar.gz", "https://api.github.com/repos/rhysd/actionlint/releases/assets/384924893", true},
-	{"actionlint", "1.7.12", "aqua:rhysd/actionlint", "windows-x64", "https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_windows_amd64.zip", "https://api.github.com/repos/rhysd/actionlint/releases/assets/384924919", true},
-	{"shellcheck", "0.11.0", "aqua:koalaman/shellcheck", "linux-x64", "https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.x86_64.tar.xz", "https://api.github.com/repos/koalaman/shellcheck/releases/assets/279056942", false},
-	{"shellcheck", "0.11.0", "aqua:koalaman/shellcheck", "macos-arm64", "https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.darwin.aarch64.tar.xz", "https://api.github.com/repos/koalaman/shellcheck/releases/assets/279056932", false},
-	{"shellcheck", "0.11.0", "aqua:koalaman/shellcheck", "windows-x64", "https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.zip", "https://api.github.com/repos/koalaman/shellcheck/releases/assets/279056944", false},
-	{"taplo", "0.10.0", "aqua:tamasfe/taplo", "linux-x64", "https://github.com/tamasfe/taplo/releases/download/0.10.0/taplo-linux-x86_64.gz", "https://api.github.com/repos/tamasfe/taplo/releases/assets/257322600", false},
-	{"taplo", "0.10.0", "aqua:tamasfe/taplo", "macos-arm64", "https://github.com/tamasfe/taplo/releases/download/0.10.0/taplo-darwin-aarch64.gz", "https://api.github.com/repos/tamasfe/taplo/releases/assets/257323110", false},
-	{"taplo", "0.10.0", "aqua:tamasfe/taplo", "windows-x64", "https://github.com/tamasfe/taplo/releases/download/0.10.0/taplo-windows-x86_64.zip", "https://api.github.com/repos/tamasfe/taplo/releases/assets/257323062", false},
-	{"zizmor", "1.30.1", "aqua:zizmorcore/zizmor", "linux-x64", "https://github.com/zizmorcore/zizmor/releases/download/v1.30.1/zizmor-x86_64-unknown-linux-gnu.tar.gz", "https://api.github.com/repos/zizmorcore/zizmor/releases/assets/552067642", true},
-	{"zizmor", "1.30.1", "aqua:zizmorcore/zizmor", "macos-arm64", "https://github.com/zizmorcore/zizmor/releases/download/v1.30.1/zizmor-aarch64-apple-darwin.tar.gz", "https://api.github.com/repos/zizmorcore/zizmor/releases/assets/552067640", true},
-	{"zizmor", "1.30.1", "aqua:zizmorcore/zizmor", "windows-x64", "https://github.com/zizmorcore/zizmor/releases/download/v1.30.1/zizmor-x86_64-pc-windows-msvc.zip", "https://api.github.com/repos/zizmorcore/zizmor/releases/assets/552067645", true},
+	{"actionlint", "1.6.26", "aqua:rhysd/actionlint", "linux-x64", "https://github.com/rhysd/actionlint/releases/download/v1.6.26/actionlint_1.6.26_linux_amd64.tar.gz", "https://api.github.com/repos/rhysd/actionlint/releases/assets/384924896", true},
+	{"actionlint", "1.6.26", "aqua:rhysd/actionlint", "macos-arm64", "https://github.com/rhysd/actionlint/releases/download/v1.6.26/actionlint_1.6.26_darwin_arm64.tar.gz", "https://api.github.com/repos/rhysd/actionlint/releases/assets/384924893", true},
+	{"actionlint", "1.6.26", "aqua:rhysd/actionlint", "windows-x64", "https://github.com/rhysd/actionlint/releases/download/v1.6.26/actionlint_1.6.26_windows_amd64.zip", "https://api.github.com/repos/rhysd/actionlint/releases/assets/384924919", true},
+	{"shellcheck", "0.10.3", "aqua:koalaman/shellcheck", "linux-x64", "https://github.com/koalaman/shellcheck/releases/download/v0.10.3/shellcheck-v0.10.3.linux.x86_64.tar.xz", "https://api.github.com/repos/koalaman/shellcheck/releases/assets/279056942", false},
+	{"shellcheck", "0.10.3", "aqua:koalaman/shellcheck", "macos-arm64", "https://github.com/koalaman/shellcheck/releases/download/v0.10.3/shellcheck-v0.10.3.darwin.aarch64.tar.xz", "https://api.github.com/repos/koalaman/shellcheck/releases/assets/279056932", false},
+	{"shellcheck", "0.10.3", "aqua:koalaman/shellcheck", "windows-x64", "https://github.com/koalaman/shellcheck/releases/download/v0.10.3/shellcheck-v0.10.3.zip", "https://api.github.com/repos/koalaman/shellcheck/releases/assets/279056944", false},
+	{"taplo", "0.9.8", "aqua:tamasfe/taplo", "linux-x64", "https://github.com/tamasfe/taplo/releases/download/0.9.8/taplo-linux-x86_64.gz", "https://api.github.com/repos/tamasfe/taplo/releases/assets/257322600", false},
+	{"taplo", "0.9.8", "aqua:tamasfe/taplo", "macos-arm64", "https://github.com/tamasfe/taplo/releases/download/0.9.8/taplo-darwin-aarch64.gz", "https://api.github.com/repos/tamasfe/taplo/releases/assets/257323110", false},
+	{"taplo", "0.9.8", "aqua:tamasfe/taplo", "windows-x64", "https://github.com/tamasfe/taplo/releases/download/0.9.8/taplo-windows-x86_64.zip", "https://api.github.com/repos/tamasfe/taplo/releases/assets/257323062", false},
+	{"zizmor", "1.22.0", "aqua:zizmorcore/zizmor", "linux-x64", "https://github.com/zizmorcore/zizmor/releases/download/v1.22.0/zizmor-x86_64-unknown-linux-gnu.tar.gz", "https://api.github.com/repos/zizmorcore/zizmor/releases/assets/552067642", true},
+	{"zizmor", "1.22.0", "aqua:zizmorcore/zizmor", "macos-arm64", "https://github.com/zizmorcore/zizmor/releases/download/v1.22.0/zizmor-aarch64-apple-darwin.tar.gz", "https://api.github.com/repos/zizmorcore/zizmor/releases/assets/552067640", true},
+	{"zizmor", "1.22.0", "aqua:zizmorcore/zizmor", "windows-x64", "https://github.com/zizmorcore/zizmor/releases/download/v1.22.0/zizmor-x86_64-pc-windows-msvc.zip", "https://api.github.com/repos/zizmorcore/zizmor/releases/assets/552067645", true},
 }
 
 // noneTracked is the trackedLister for a checkout that tracks nothing.
@@ -99,12 +99,12 @@ func TestPinsFindings_Intact(t *testing.T) {
 // Each case changes one thing a pull request can change, and the check must
 // refuse it and say which line is wrong.
 func TestPinsFindings_Tampered(t *testing.T) {
-	taploWindowsURL := "https://github.com/tamasfe/taplo/releases/download/0.10.0/taplo-windows-x86_64.zip"
+	taploWindowsURL := "https://github.com/tamasfe/taplo/releases/download/0.9.8/taplo-windows-x86_64.zip"
 	taploWindowsAPI := "https://api.github.com/repos/tamasfe/taplo/releases/assets/257323062"
 	// A version that walks from taplo's release to ShellCheck's. Written into
 	// the pin, the lock and every url, it leaves each url equal to the one
 	// built from it, so the version rule is the only check left to refuse it.
-	traversal := "0.10.0/../../../../koalaman/shellcheck/releases/download/v0.11.0"
+	traversal := "0.9.8/../../../../koalaman/shellcheck/releases/download/v0.10.3"
 	replaceLock := func(old, replacement string) func(string) string {
 		return func(s string) string { return strings.Replace(s, old, replacement, 1) }
 	}
@@ -123,13 +123,13 @@ func TestPinsFindings_Tampered(t *testing.T) {
 
 		// url, held byte for byte.
 		{name: "url host swapped", lock: replaceLock("https://github.com/rhysd", "https://placeholder.invalid/rhysd"), wantIn: "actionlint linux-x64 url is"},
-		{name: "url names another release", lock: replaceLock("/download/0.10.0/taplo-windows", "/download/0.9.3/taplo-windows"), wantIn: "taplo windows-x64 url is"},
+		{name: "url names another release", lock: replaceLock("/download/0.9.8/taplo-windows", "/download/0.8.9/taplo-windows"), wantIn: "taplo windows-x64 url is"},
 		{name: "url with an extra segment", lock: replaceLock(taploWindowsURL, taploWindowsURL+"/extra"), wantIn: "taplo windows-x64 url is"},
 		{name: "url names an asset the release does not carry", lock: replaceLock("taplo-windows-x86_64.zip", "taplo-missing.zip"), wantIn: "taplo windows-x64 url is"},
 		{name: "url names another platform's asset", lock: replaceLock("taplo-windows-x86_64.zip", "taplo-linux-x86_64.gz"), wantIn: "taplo windows-x64 url is"},
 		{name: "url scheme in capitals", lock: replaceLock("url = \"https://github.com/tamasfe", "url = \"HTTPS://github.com/tamasfe"), wantIn: "url is"},
-		{name: "url with dot segments to another owner", lock: replaceLock(taploWindowsURL, "https://github.com/tamasfe/taplo/releases/download/0.10.0/../../../../koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.zip"), wantIn: "taplo windows-x64 url is"},
-		{name: "url carrying a raw tab", lock: replaceLock(taploWindowsURL, "https://github.com/tamasfe/taplo/releases/download/0.10.0/.\t./taplo-windows-x86_64.zip"), wantIn: "taplo windows-x64 url is"},
+		{name: "url with dot segments to another owner", lock: replaceLock(taploWindowsURL, "https://github.com/tamasfe/taplo/releases/download/0.9.8/../../../../koalaman/shellcheck/releases/download/v0.10.3/shellcheck-v0.10.3.zip"), wantIn: "taplo windows-x64 url is"},
+		{name: "url carrying a raw tab", lock: replaceLock(taploWindowsURL, "https://github.com/tamasfe/taplo/releases/download/0.9.8/.\t./taplo-windows-x86_64.zip"), wantIn: "taplo windows-x64 url is"},
 		{name: "url carrying a query", lock: replaceLock(taploWindowsURL, taploWindowsURL+"?x=1"), wantIn: "taplo windows-x64 url is"},
 
 		// url_api, held to the repository's asset path and an id.
@@ -154,30 +154,30 @@ func TestPinsFindings_Tampered(t *testing.T) {
 			name: "nested platforms table beside the quoted one",
 			lock: func(s string) string {
 				return s + "[tools.taplo.platforms.windows-x64]\nchecksum = \"sha256:" + strings.Repeat("00", 32) +
-					"\"\nurl = \"https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.zip\"\n"
+					"\"\nurl = \"https://github.com/koalaman/shellcheck/releases/download/v0.10.3/shellcheck-v0.10.3.zip\"\n"
 			},
 			wantIn: "nested platforms table for taplo",
 		},
 
 		// The pins.
-		{name: "version bumped in the pins alone", pins: replaceLock("zizmor = \"1.30.1\"", "zizmor = \"1.30.2\""), wantIn: "records \"1.30.1\""},
-		{name: "version carrying a path", pins: replaceLock("taplo = \"0.10.0\"", "taplo = \"0.10.0/../../../koalaman\""), wantIn: "a taplo release version matches"},
+		{name: "version bumped in the pins alone", pins: replaceLock("zizmor = \"1.22.0\"", "zizmor = \"1.22.1\""), wantIn: "records \"1.22.0\""},
+		{name: "version carrying a path", pins: replaceLock("taplo = \"0.9.8\"", "taplo = \"0.9.8/../../../koalaman\""), wantIn: "a taplo release version matches"},
 		{
 			name: "traversal version in the pin, the lock and every url",
-			pins: replaceLock(`taplo = "0.10.0"`, `taplo = "`+traversal+`"`),
+			pins: replaceLock(`taplo = "0.9.8"`, `taplo = "`+traversal+`"`),
 			lock: func(s string) string {
-				s = strings.Replace(s, `version = "0.10.0"`, `version = "`+traversal+`"`, 1)
-				return strings.ReplaceAll(s, "/download/0.10.0/", "/download/"+traversal+"/")
+				s = strings.Replace(s, `version = "0.9.8"`, `version = "`+traversal+`"`, 1)
+				return strings.ReplaceAll(s, "/download/0.9.8/", "/download/"+traversal+"/")
 			},
 			wantIn: "mise.toml pins taplo at",
 		},
-		{name: "lock version outside the release shape", lock: replaceLock(`version = "0.10.0"`, `version = "0.10.0-rc1"`), wantIn: "mise.lock records taplo at"},
+		{name: "lock version outside the release shape", lock: replaceLock(`version = "0.9.8"`, `version = "0.9.8-rc1"`), wantIn: "mise.lock records taplo at"},
 		{name: "no lockfile_platforms", pins: replaceLock("lockfile_platforms = [\"linux-x64\", \"macos-arm64\", \"windows-x64\"]\n", ""), wantIn: "names no lockfile_platforms"},
 		{name: "empty lockfile_platforms", pins: replaceLock("[\"linux-x64\", \"macos-arm64\", \"windows-x64\"]", "[]"), wantIn: "names no lockfile_platforms"},
 		{name: "a platform with no asset constant", pins: replaceLock("\"windows-x64\"]", "\"windows-x64\", \"linux-arm64\"]"), wantIn: `holds no asset for actionlint on "linux-arm64"`},
 		{name: "an asset constant with no platform", pins: replaceLock("\"macos-arm64\", ", ""), wantIn: "names an asset for actionlint on macos-arm64"},
 		{name: "tool pinned that pins.go does not expect", pins: replaceLock("[tools]\n", "[tools]\nhadolint = \"2.14.0\"\n"), wantIn: `pins "hadolint"`},
-		{name: "tool expected that the pins do not name", pins: replaceLock("shellcheck = \"0.11.0\"\n", ""), wantIn: "expects shellcheck"},
+		{name: "tool expected that the pins do not name", pins: replaceLock("shellcheck = \"0.10.3\"\n", ""), wantIn: "expects shellcheck"},
 
 		// The url_replacements rule, compared with the rest of [settings].
 		{name: "rule missing from mise.toml", pins: replaceLock("url_replacements = {", "# url_replacements = {"), wantIn: `url_replacements is absent`},
@@ -197,16 +197,16 @@ func TestPinsFindings_Tampered(t *testing.T) {
 		{name: "a setting added", pins: replaceLock("lockfile = true\n", "lockfile = true\nparanoid = false\n"), wantIn: `[settings] paranoid is "false", and it must be absent`},
 		{name: "an aqua setting turned off", pins: replaceLock("[settings.aqua]\ngithub_attestations = true", "[settings.aqua]\ngithub_attestations = false"), wantIn: "[settings] aqua is"},
 		{name: "tool_config unlocked", pins: replaceLock("[tool_config]\nlocked = true", "[tool_config]\nlocked = false"), wantIn: `[tool_config] locked is "false", and it must be "true"`},
-		{name: "a tool entry with an install hook", pins: replaceLock(`taplo = "0.10.0"`, `taplo = { version = "0.10.0", postinstall = "echo hooked" }`), wantIn: `[tools] taplo carries "postinstall"`},
-		{name: "a tool entry with another prefix", pins: replaceLock(`zizmor = "1.30.1"`, `zizmor = { version = "1.30.1", version_prefix = "release-" }`), wantIn: `[tools] zizmor version_prefix is "release-"`},
-		{name: "a tool entry that is neither", pins: replaceLock(`taplo = "0.10.0"`, `taplo = 10`), wantIn: `[tools] taplo is "10"`},
+		{name: "a tool entry with an install hook", pins: replaceLock(`taplo = "0.9.8"`, `taplo = { version = "0.9.8", postinstall = "echo hooked" }`), wantIn: `[tools] taplo carries "postinstall"`},
+		{name: "a tool entry with another prefix", pins: replaceLock(`zizmor = "1.22.0"`, `zizmor = { version = "1.22.0", version_prefix = "release-" }`), wantIn: `[tools] zizmor version_prefix is "release-"`},
+		{name: "a tool entry that is neither", pins: replaceLock(`taplo = "0.9.8"`, `taplo = 10`), wantIn: `[tools] taplo is "10"`},
 		{
 			name: "a tool entry as an array of tables, which mise reads with its install hook",
 			pins: func(s string) string {
-				return strings.Replace(s, "taplo = \"0.10.0\"\n", "", 1) +
-					"\n[[tools.taplo]]\nversion = \"0.10.0\"\npostinstall = \"echo hooked\"\n"
+				return strings.Replace(s, "taplo = \"0.9.8\"\n", "", 1) +
+					"\n[[tools.taplo]]\nversion = \"0.9.8\"\npostinstall = \"echo hooked\"\n"
 			},
-			wantIn: `[tools] taplo is "[map[postinstall:echo hooked version:0.10.0]]", and it must be a version or a table holding one`,
+			wantIn: `[tools] taplo is "[map[postinstall:echo hooked version:0.9.8]]", and it must be a version or a table holding one`,
 		},
 
 		// mise.lock keys, allow-listed at every level, and the format it is
@@ -218,7 +218,7 @@ func TestPinsFindings_Tampered(t *testing.T) {
 		{
 			name: "a tool the lock records that pins.go does not expect",
 			lock: func(s string) string {
-				return s + "[[tools.cosign]]\nversion = \"2.5.0\"\nbackend = \"aqua:sigstore/cosign\"\n"
+				return s + "[[tools.cosign]]\nversion = \"2.4.9\"\nbackend = \"aqua:sigstore/cosign\"\n"
 			},
 			wantIn: `mise.lock records "cosign", and pins.go holds no expectation for it`,
 		},
@@ -279,7 +279,7 @@ func TestPinsFindings_StrayConfig(t *testing.T) {
 			dir := writeFixture(t, intactPins, intactLock())
 			target := filepath.Join(dir, filepath.FromSlash(tt.file))
 			require.NoError(t, os.MkdirAll(filepath.Dir(target), 0o700))
-			require.NoError(t, os.WriteFile(target, []byte("[tools]\ntaplo = \"0.10.0\"\n"), 0o600))
+			require.NoError(t, os.WriteFile(target, []byte("[tools]\ntaplo = \"0.9.8\"\n"), 0o600))
 			found, err := pinsFindings(dir, noneTracked)
 			require.NoError(t, err)
 			if tt.wantIn == "" {

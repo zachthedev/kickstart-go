@@ -45,7 +45,7 @@ type shellSetting struct {
 // ///////////////////////////////////////////////
 
 const (
-	// taploFound opens the line taplo 0.10.0 logs once it has collected the
+	// taploFound opens the line the pinned taplo logs once it has collected the
 	// files it will check. It lists them after taploFiles as a Rust debug
 	// list of absolute paths. taplo logs no such line when its config
 	// excludes every file it was handed.

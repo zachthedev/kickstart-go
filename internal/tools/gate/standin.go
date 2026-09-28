@@ -43,7 +43,7 @@ const standInArgument = "shellcheck-stand-in"
 
 // shellCheckDirective matches a ShellCheck directive in one line of a script:
 // #, any space ShellCheck reads as line whitespace, the word shellcheck, and
-// one more such space. ShellCheck 0.11.0 reads the word in lowercase alone
+// one more such space. The pinned ShellCheck reads the word in lowercase alone
 // (src/ShellCheck/Parser.hs), so matching it in any case refuses more than
 // ShellCheck honors, never less.
 var shellCheckDirective = regexp.MustCompile(`(?i)#[\s\x{00a0}\x{2002}-\x{2009}\x{200b}\x{202f}]*shellcheck[\s\x{00a0}\x{2002}-\x{2009}\x{200b}\x{202f}]`)
