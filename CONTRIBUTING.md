@@ -584,8 +584,9 @@ Setup that CI installs at a pinned version takes a line for that copy.
 - mise itself, in CI: the publisher's signature, on `jdx/mise-action`'s `version:` line in `ci.yml`. The action
   checks the release's signed checksums.
 - golangci-lint, govulncheck, task, lefthook, go-test-coverage, testpair and deadcode: the registry's record, in
-  `go.sum`, from Go's checksum database. Every build checks `go.sum` against the module cache, and the database
-  answers only for a hash `go.sum` lacks.
+  `go.sum`, from Go's checksum database. go checks a module against `go.sum` when it downloads it, and the database
+  answers only for a hash `go.sum` lacks. For a module already in the module cache, go compares `go.sum` with the
+  hash recorded at its download and does not hash its files again.
 - Prettier, commitlint and `yaml`: the registry's record, in `bun.lock`.
 - ShellCheck: the release's own checksum, in `mise.lock`.
 - taplo: a hash this repository computed, in `mise.lock`. Its checksums are the sha256 of its release artifacts,
