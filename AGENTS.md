@@ -43,7 +43,8 @@ repository, each with its reason. Keep the ones below that still apply. -->
   still in the tree is work a person has not done yet, and the inventory is the one list of it.
 - Never hand-edit `CHANGELOG.md` or `.release-please-manifest.json`, except the one template reset
   ([why, and the reset](CONTRIBUTING.md#what-never-happens)).
-- Never write a `mise.lock` line outside `mise lock` ([why](CONTRIBUTING.md#what-never-happens)).
+- Never write a `mise.lock` line outside `mise lock`, except a checksum computed as `mise.toml` says
+  ([why](CONTRIBUTING.md#what-never-happens)).
 - Never merge past a red gate ([why](CONTRIBUTING.md#what-never-happens)).
 - Never put a version number in prose ([why](CONTRIBUTING.md#what-never-happens)).
 
