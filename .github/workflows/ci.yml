@@ -77,7 +77,10 @@ jobs:
         with:
           persist-credentials: false
       # The toolchain go.mod names. The action verifies no download, so that pin plus the
-      # cooldown is the control.
+      # cooldown is the control. Its cache input defaults to true, so the step restores the
+      # module and build caches an earlier run saved. go checks a module against go.sum when it
+      # downloads one, and nothing checks a restored cache, so the cache is trusted as it
+      # stands. This job holds no secret and its token only reads, so it keeps the cache.
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
