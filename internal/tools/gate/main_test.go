@@ -228,27 +228,22 @@ func TestRun_Walk(t *testing.T) {
 		t.Setenv("PATH", t.TempDir())
 		walkRow(t, []string{"format"}, 2, "", "gate format: finding bun on PATH")
 	})
+	gitOnly := gitOnlyDir(t, git)
 	t.Run("zizmor runs online when the gh on PATH answers", func(t *testing.T) {
-		t.Setenv("PATH", fakeProgramDir(t, "gh")+string(os.PathListSeparator)+filepath.Dir(git))
+		t.Setenv("PATH", fakeProgramDir(t, "gh")+string(os.PathListSeparator)+gitOnly)
 		t.Setenv("GATE_FAKE_GH", "")
 		walkRow(t, []string{"zizmor", zizmor}, 0, "zizmor ran online, since gh auth token answered, and completed 1 file: .github/workflows/ci.yml", "")
 	})
 	t.Run("zizmor runs offline with no gh on PATH", func(t *testing.T) {
-		t.Setenv("PATH", filepath.Dir(git))
-		if found, err := exec.LookPath("gh"); err == nil {
-			t.Skipf("gh sits beside git at %s, so this case would start it", found)
-		}
+		t.Setenv("PATH", gitOnly)
 		walkRow(t, []string{"zizmor", zizmor}, 0, "zizmor ran offline", "")
 	})
 	t.Run("packages prints the count go list gives", func(t *testing.T) {
-		t.Setenv("PATH", fakeProgramDir(t, "go")+string(os.PathListSeparator)+filepath.Dir(git))
+		t.Setenv("PATH", fakeProgramDir(t, "go")+string(os.PathListSeparator)+gitOnly)
 		walkRow(t, packages, 0, "go list ./... matched 2 packages, and the rows read linux/amd64 windows/amd64, each with no build tags", "")
 	})
 	t.Run("packages with no go on PATH is an error", func(t *testing.T) {
-		t.Setenv("PATH", filepath.Dir(git))
-		if found, err := exec.LookPath("go"); err == nil {
-			t.Skipf("go sits beside git at %s, so this case would start it", found)
-		}
+		t.Setenv("PATH", gitOnly)
 		walkRow(t, packages, 2, "", "gate packages: finding go on PATH")
 	})
 	t.Run("a row outside a repository is an error", func(t *testing.T) {

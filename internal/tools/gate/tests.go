@@ -46,11 +46,11 @@ const skippedShown = 10
 
 // declaredSkips is how many tests a test row skips on each platform, keyed by
 // GOOS, and the row fails on any other count. A platform it does not name
-// declares none. Each count is what that platform's CI runner skips: the cases
-// for a behavior another platform alone has, and the cases that step aside
-// where the runner keeps gh beside git. A skip past the count is a test that
-// did not run, and a count short of it is a declaration whose gap closed.
-var declaredSkips = map[string]int{"darwin": 4, "linux": 5, "windows": 3}
+// declares none. Each count is the cases for a behavior another platform alone
+// has, so it depends on GOOS and nothing else about the machine. A skip past the
+// count is a test that did not run, such as one missing a program Setup names,
+// and a count short of it is a declaration whose gap closed.
+var declaredSkips = map[string]int{"darwin": 3, "linux": 3, "windows": 3}
 
 // ///////////////////////////////////////////////
 // The row

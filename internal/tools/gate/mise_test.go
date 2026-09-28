@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -16,6 +17,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// gitTarget is the file beside a fake git that names the real git it runs.
+const gitTarget = "git.target"
 
 // The pins every mise child carries, whatever it inherited.
 var wantPins = []string{
@@ -38,7 +42,7 @@ func TestMain(m *testing.M) {
 	case strings.HasPrefix(base, "mise"):
 		os.Exit(fakeMise(os.Stdout, os.Args[1:]))
 	case strings.HasPrefix(base, "git"):
-		os.Exit(fakeGit(os.Stderr))
+		os.Exit(fakeGit(os.Stdin, os.Stdout, os.Stderr, os.Args[1:]))
 	case strings.HasPrefix(base, "taplo"):
 		os.Exit(fakeTaplo(os.Stderr, os.Args[1:]))
 	case strings.HasPrefix(base, "bun"):
@@ -76,10 +80,32 @@ func fakeMise(out io.Writer, args []string) int {
 	return 0
 }
 
-// fakeGit answers as git does for a checkout another account owns.
-func fakeGit(stderr io.Writer) int {
-	fmt.Fprintln(stderr, "fatal: detected dubious ownership in repository at 'checkout'")
-	return 128
+// fakeGit runs the git the gitTarget file beside it names, relaying its input,
+// output and exit code, so a PATH holding its directory alone reaches a real
+// git and no other program. With no such file it answers as git does for a
+// checkout another account owns.
+func fakeGit(stdin io.Reader, stdout, stderr io.Writer, args []string) int {
+	self, err := os.Executable()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 127
+	}
+	target, err := os.ReadFile(filepath.Join(filepath.Dir(self), gitTarget))
+	if err != nil {
+		fmt.Fprintln(stderr, "fatal: detected dubious ownership in repository at 'checkout'")
+		return 128
+	}
+	cmd := exec.Command(string(target), args...) // #nosec G204 G702 -- the target is the git the test found on PATH, written beside this copy of the test binary
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, stderr
+	err = cmd.Run()
+	if exit, ok := errors.AsType[*exec.ExitError](err); ok {
+		return exit.ExitCode()
+	}
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 127
+	}
+	return 0
 }
 
 // fakeTaplo logs the pinned taplo's found files line for every file after -- that
@@ -140,6 +166,16 @@ func fakeProgramDir(t *testing.T, name string) string {
 	require.NoError(t, err)
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, programName(name)), data, 0o700)) // #nosec G703 -- the test copies its own binary into its own temporary directory
+	return dir
+}
+
+// gitOnlyDir makes a directory holding one program, a fake git that runs the
+// real git at git, and returns it. A PATH of that directory alone reaches git
+// and no other program, whatever this machine keeps beside its git.
+func gitOnlyDir(t *testing.T, git string) string {
+	t.Helper()
+	dir := fakeProgramDir(t, "git")
+	require.NoError(t, os.WriteFile(filepath.Join(dir, gitTarget), []byte(git), 0o600))
 	return dir
 }
 
@@ -256,7 +292,7 @@ func TestResolveProgram(t *testing.T) {
 // subcommand exits with the child's code.
 func TestRun_Mise(t *testing.T) {
 	_, git := intactCheckout(t)
-	t.Setenv("PATH", fakeMiseDir(t)+string(os.PathListSeparator)+filepath.Dir(git))
+	t.Setenv("PATH", fakeMiseDir(t)+string(os.PathListSeparator)+gitOnlyDir(t, git))
 	t.Setenv("MISE_GLOBAL_CONFIG_FILE", "probe-global.toml")
 	t.Setenv("MISE_URL_REPLACEMENTS", "{}")
 	t.Setenv("XDG_CONFIG_HOME", "probe-xdg")
@@ -322,7 +358,7 @@ func TestRun_MiseRefused(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			dir, git := intactCheckout(t)
-			t.Setenv("PATH", fakeMiseDir(t)+string(os.PathListSeparator)+filepath.Dir(git))
+			t.Setenv("PATH", fakeMiseDir(t)+string(os.PathListSeparator)+gitOnlyDir(t, git))
 			tt.plant(t, dir)
 			var stdout, stderr bytes.Buffer
 			assert.Equal(t, 1, run(t.Context(), []string{"mise", "which", "taplo"}, strings.NewReader(""), &stdout, &stderr))
@@ -334,10 +370,7 @@ func TestRun_MiseRefused(t *testing.T) {
 
 func TestRun_MiseMissing(t *testing.T) {
 	_, git := intactCheckout(t)
-	t.Setenv("PATH", filepath.Dir(git))
-	if found, err := exec.LookPath("mise"); err == nil {
-		t.Skipf("mise sits beside git at %s, so this case would start it", found)
-	}
+	t.Setenv("PATH", gitOnlyDir(t, git))
 	var stdout, stderr bytes.Buffer
 	assert.Equal(t, 2, run(t.Context(), []string{"mise", "which", "taplo"}, strings.NewReader(""), &stdout, &stderr))
 	assert.Contains(t, stderr.String(), "finding mise on PATH")
