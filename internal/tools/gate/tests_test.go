@@ -128,7 +128,7 @@ func skips(n int) string {
 // Each case is a run on one platform that skipped some tests, and the row
 // must pass at the count that platform declares and fail one skip past it or
 // one short of it, naming what skipped. A platform the map does not name
-// declares none.
+// declares none, and every platform CI runs has a declaration, 0 included.
 func TestTestsRow_DeclaredSkips(t *testing.T) {
 	type platform struct {
 		goos     string
@@ -162,9 +162,11 @@ func TestTestsRow_DeclaredSkips(t *testing.T) {
 			assert.Empty(t, stdout.String())
 		})
 	}
-	t.Run("the platforms CI runs each declare a skip", func(t *testing.T) {
+	t.Run("the platforms CI runs each declare a count, zero included", func(t *testing.T) {
 		for _, goos := range []string{"linux", "darwin", "windows"} {
-			assert.Positive(t, declaredSkips[goos], "%s declares its skips", goos)
+			count, ok := declaredSkips[goos]
+			assert.True(t, ok, "declaredSkips names %s, a platform CI runs, even when it skips nothing", goos)
+			assert.GreaterOrEqual(t, count, 0, "%s declares a count of skips", goos)
 		}
 	})
 	t.Run("a stale count with nothing skipped says so", func(t *testing.T) {
