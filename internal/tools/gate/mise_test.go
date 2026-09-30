@@ -110,15 +110,23 @@ func fakeGit(stdin io.Reader, stdout, stderr io.Writer, args []string) int {
 
 // fakeTaplo logs the pinned taplo's found files line for every file after -- that
 // exists, as absolute paths with forward slashes, and exits 0 as taplo does
-// whatever it found.
+// whatever it found. The gate hands taplo tracked names, relative to the
+// working directory, so the fake looks each one up through an os.Root there.
 func fakeTaplo(stderr io.Writer, args []string) int {
 	_, files, _ := cutArgs(args, "--")
+	root, err := os.OpenRoot(".")
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	defer root.Close()
 	var quoted []string
 	for _, name := range files {
+		if _, err := root.Stat(name); err != nil {
+			continue
+		}
 		if abs, err := filepath.Abs(name); err == nil {
-			if _, err := os.Stat(abs); err == nil {
-				quoted = append(quoted, strconv.Quote(filepath.ToSlash(abs)))
-			}
+			quoted = append(quoted, strconv.Quote(filepath.ToSlash(abs)))
 		}
 	}
 	fmt.Fprintf(stderr, " INFO taplo:format_files:collect_files: found files total=%d excluded=0 files=[%s] cwd=\".\"\n", len(quoted), strings.Join(quoted, ", "))
