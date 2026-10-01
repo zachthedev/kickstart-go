@@ -366,10 +366,11 @@ token, and that job is the one CI job that holds it, so CI's gate job runs zizmo
 online when `gh auth token` answers, and its summary says which mode ran.
 
 The shared `commits` and `workflows` jobs refuse, before a merge, the files that run code in Bun, bun install or
-commitlint, or that waive a check. The gate keeps no copy of these refusals. A refusal of its own that overlaps one,
-as the root `.config` does, stays because a program the gate starts reads that path. A pull request cannot change
-what either job runs at its pinned commit. It can change `ci.yml`'s call, and that change waits on the code owner's
-review like the gate's code. The shared jobs refuse:
+commitlint, or that waive a check. Both run their refusals on every pull request, on every push to `main` and daily
+from `audit.yml`, and the `commits` job runs its commitlint steps on a pull request alone. The gate keeps no copy of
+these refusals. A refusal of its own that overlaps one, as the root `.config` does, stays because a program the gate
+starts reads that path. A pull request cannot change what either job runs at its pinned commit. It can change
+`ci.yml`'s call, and that change waits on the code owner's review like the gate's code. The shared jobs refuse:
 
 - A tracked `node_modules` or a path under one, and every tracked symbolic link.
 - An env file Bun loads, tracked at any depth.
@@ -378,8 +379,14 @@ review like the gate's code. The shared jobs refuse:
 - `patchedDependencies` or `exports` in any tracked `package.json`, and a `cosmiconfig` key in the root one.
 - A tracked root `.config` or `package.yaml`, where cosmiconfig reads its own settings ([Safety](#safety)).
 - A `bunfig.toml` holding any key but `[install] minimumReleaseAge`.
+- A tree that does not track `.github/renovate.json` as a file. Without it Renovate reads a root `renovate.json`,
+  a `.renovaterc` or a `package.json` `renovate` key in its place.
+- A `packageManager` other than `bun@X.Y.Z`, and a root `.node-version` other than one `X.Y.Z` line. setup-bun and
+  setup-node resolve a range or a name such as `latest` when the job runs, past the cooldown.
 - A root file named like a program a gate starts, and a root entry named `'`.
 - An inline `zizmor: ignore[...]` comment under `.github`. A waiver lives in the rules of `.github/zizmor.yml`.
+- A key repeated in one mapping of `.github/zizmor.yml`, an anchor, or a second document. zizmor keeps the last copy
+  of a repeated audit, so a later copy can turn off an audit the first configures.
 - A `secrets: inherit` call into anything but `zachthedev/.github`'s reusable workflows, and a `secrets-inherit`
   waiver that names no such call or names a position.
 
@@ -552,7 +559,7 @@ The advisory legs:
   the `vulncheck` task with a dated comment there naming the advisory.
 - The `audit` workflow runs `bun run audit` over the whole of `bun.lock`, transitives included, once a day as a
   report. It never blocks a merge. A red run is work to pick up. Its `workflows` job runs zizmor's online audits of
-  every pinned action with no pull request open.
+  every pinned action with no pull request open, and its `commits` job runs the shared tree refusals over `main`.
 - Dependabot alerts stay on and its security updates stay off. Renovate opens the fix for a direct dependency and
   for an indirect Go module, since `go.mod` names it. A transitive Bun advisory is fixed by hand from the alert with
   `bun audit fix`, because no bot fixes one.
@@ -604,10 +611,12 @@ config file can lift.
 
 `mise.toml` holds `[tools]`, `[tool_config]` and `[settings]` alone, because `[hooks]`, `[env]`, `[vars]`,
 `[tasks]` or a tool's options can run a command during `mise install`. `pins.go` compares `[tool_config]` and
-`[settings]` whole. A tool entry, and a lockfile entry's `options`, carries only `version` and a `version_prefix`
-equal to the tag prefix. A tool entry in any other form, the `[[tools.<name>]]` array of tables included, is
-refused. Every `mise.lock` key sits on an allow-list, each tool name under `tools` included, and `lockfile_version`
-must be the format `mise lock` writes.
+`[settings]` whole. Each `[tools]` key is a tool `pins.go` expects, spelled exactly, and each lockfile `backend` is
+the `aqua:` coordinate it names, since mise reads options written in brackets after either, `postinstall` among
+them. A tool entry, and a lockfile entry's `options`, carries only `version` and a `version_prefix` equal to the tag
+prefix. A tool entry in any other form, the `[[tools.<name>]]` array of tables included, is refused. Every
+`mise.lock` key sits on an allow-list, each tool name under `tools` included, and `lockfile_version` must be the
+format `mise lock` writes.
 
 mise merges every config file it finds, each with its sibling lockfile, so a `mise.local.toml` beside a
 `mise.local.lock` would decide what an install fetches. `pins.go` refuses every mise config or lock file other than
