@@ -258,7 +258,9 @@ Tests that need a real thing:
 - `internal/tools/version`'s test runs the tool through `go run` and reads the checkout's own `git describe`, so it
   needs `go` and `git` on `PATH` and a git checkout. A build-time helper has no other caller.
 - `internal/remote`'s and `internal/version`'s tests run `git` against a repository they create under
-  `t.TempDir()`, so they need `git` on `PATH` and nothing else. What they test is the git call.
+  `t.TempDir()`, so they need `git` on `PATH` and nothing else. What they test is the git call. Their wait-delay
+  tests set `PATH` to a directory holding a copy of the test binary named `git`, which plays Git for Windows'
+  launcher.
 - `internal/generate`'s printed-check test runs the absorbed command `MARKERS.md` prints through `sh` in a
   repository it creates the same way, so it needs `sh` and `git` on `PATH`, and it skips without either. The
   command's exit status is what it tests.

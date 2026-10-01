@@ -18,6 +18,24 @@ import (
 	"time"
 )
 
+// lookupWaitDelay bounds the wait for git's output once git has exited or
+// the deadline has killed it. Git for Windows' cmd\git.exe and bin\git.exe
+// launch a second git.exe that does the work. That git.exe keeps the output
+// pipe open after the launcher dies. Without this bound, the call waits for
+// it however long it runs.
+const lookupWaitDelay = 500 * time.Millisecond
+
+// remoteLookupTimeout bounds the git call that resolves the remote. It stops
+// a git that never answers from holding the first caller for good. Such a
+// git waits on a repository or an included configuration file on a
+// disconnected network share, or on a stalled disk. `git remote get-url`
+// reads configuration alone, so it reaches no remote and runs no credential
+// helper.
+//
+// It is a variable so a test can raise it past any machine stall or set it to
+// zero. Nothing else writes it.
+var remoteLookupTimeout = 2 * time.Second
+
 // Set at build time via:
 //
 //	-X <module>/internal/remote.ldOwner=...
@@ -62,9 +80,11 @@ func ensureInit() {
 			repo = ldRepo
 			return
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), remoteLookupTimeout)
 		defer cancel()
-		out, err := exec.CommandContext(ctx, "git", "remote", "get-url", "origin").Output()
+		cmd := exec.CommandContext(ctx, "git", "remote", "get-url", "origin")
+		cmd.WaitDelay = lookupWaitDelay
+		out, err := cmd.Output()
 		if err != nil {
 			slog.Debug("remote: ldflags not set and git remote unavailable", "error", err)
 			return

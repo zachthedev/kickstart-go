@@ -32,15 +32,24 @@ import (
 )
 
 // ///////////////////////////////////////////////
-// Constants
+// Git call bounds
 // ///////////////////////////////////////////////
 
+// gitWaitDelay bounds the wait for git's output once git has exited or the
+// deadline has killed it. Git for Windows' cmd\git.exe and bin\git.exe
+// launch a second git.exe that does the work. That git.exe keeps the output
+// pipe open after the launcher dies. Without this bound, the call waits for
+// it however long it runs.
+const gitWaitDelay = 500 * time.Millisecond
+
 // gitTimeout bounds one git call. runGit is reached from scripts/build.sh, so
-// a git that never answers holds the build rather than one caller: a
-// repository on a disconnected network share, or a credential helper waiting
-// on a prompt no build has a terminal for. The fallback version is usable, so
-// giving up costs less than hanging.
-const gitTimeout = 2 * time.Second
+// a git that never answers holds the build rather than one caller. Such a git
+// waits on a repository on a disconnected network share, or on a stalled
+// disk. The fallback version is usable, so giving up costs less than hanging.
+//
+// It is a variable so a test can raise it past any machine stall or set it to
+// zero. Nothing else writes it.
+var gitTimeout = 2 * time.Second
 
 // ///////////////////////////////////////////////
 // Link-time injection point
@@ -235,12 +244,14 @@ func fromBuildInfo() string {
 // ///////////////////////////////////////////////
 
 // runGit runs one git command and returns its trimmed standard output. The
-// call is bounded by [gitTimeout].
+// call is bounded by [gitTimeout] and [gitWaitDelay].
 func runGit(args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), gitTimeout)
 	defer cancel()
 
-	out, err := exec.CommandContext(ctx, "git", args...).Output()
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.WaitDelay = gitWaitDelay
+	out, err := cmd.Output()
 	if err != nil {
 		return "", err
 	}

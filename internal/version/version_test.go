@@ -1,9 +1,18 @@
 package version
 
 import (
+	"context"
+	"errors"
+	"fmt"
+	"io/fs"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"runtime/debug"
+	"strings"
 	"testing"
+	"time"
 
 	modsemver "golang.org/x/mod/semver"
 
@@ -12,6 +21,113 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// The stand-in git and the test signal each other through marker files beside
+// the stand-in. The stand-in writes standInStarted once its child runs. The
+// test writes standInRelease to end the child. The child writes standInExited
+// as it ends.
+const (
+	standInStarted = "started"
+	standInRelease = "release"
+	standInExited  = "exited"
+)
+
+// standInHoldArg is the argument the stand-in git hands the child it starts.
+const standInHoldArg = "hold-output"
+
+// standInHold caps how long the stand-in's child holds its output when
+// nothing releases it.
+const standInHold = time.Minute
+
+// TestMain lets the test binary stand in for git: a copy named git runs
+// standInGit instead of the tests.
+func TestMain(m *testing.M) {
+	if strings.HasPrefix(strings.ToLower(filepath.Base(os.Args[0])), "git") {
+		os.Exit(standInGit(os.Args[1:]))
+	}
+	os.Exit(m.Run())
+}
+
+// standInGit plays Git for Windows' launcher after it dies, while the git.exe
+// it started still holds the output. It starts a child on its own output and
+// exits. Called with standInHoldArg, it is that child: it holds the output
+// until the test writes standInRelease or standInHold passes.
+func standInGit(args []string) int {
+	self, err := os.Executable()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 127
+	}
+	dir := filepath.Dir(self)
+	if len(args) > 0 && args[0] == standInHoldArg {
+		release := filepath.Join(dir, standInRelease)
+		for end := time.Now().Add(standInHold); time.Now().Before(end); time.Sleep(10 * time.Millisecond) {
+			if _, err := os.Stat(release); err == nil {
+				break
+			}
+		}
+		if err := os.WriteFile(filepath.Join(dir, standInExited), nil, 0o600); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		return 0
+	}
+	child := exec.Command(self, standInHoldArg) // #nosec G204 -- the stand-in starts a copy of its own binary
+	child.Stdout = os.Stdout
+	if err := child.Start(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 127
+	}
+	if err := os.WriteFile(filepath.Join(dir, standInStarted), nil, 0o600); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 127
+	}
+	return 0
+}
+
+// ///////////////////////////////////////////////
+// Test Helpers
+// ///////////////////////////////////////////////
+
+// setGitTimeout sets gitTimeout for the rest of the test.
+func setGitTimeout(t *testing.T, d time.Duration) {
+	t.Helper()
+	orig := gitTimeout
+	gitTimeout = d
+	t.Cleanup(func() { gitTimeout = orig })
+}
+
+// standInGitDir copies the test binary into a fresh directory as git and
+// returns the directory. Cleanup releases the child the stand-in starts and
+// waits for it to exit, because a running copy keeps its file in use and the
+// directory cannot be removed until it ends.
+func standInGitDir(t *testing.T) string {
+	t.Helper()
+	self, err := os.Executable()
+	require.NoError(t, err)
+	data, err := os.ReadFile(self)
+	require.NoError(t, err)
+	dir := t.TempDir()
+	name := "git"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(dir, name), data, 0o700)) // #nosec G703 -- the test copies its own binary into its own temporary directory
+	t.Cleanup(func() {
+		if err := os.WriteFile(filepath.Join(dir, standInRelease), nil, 0o600); err != nil {
+			t.Errorf("releasing the stand-in's child: %v", err)
+			return
+		}
+		if _, err := os.Stat(filepath.Join(dir, standInStarted)); errors.Is(err, fs.ErrNotExist) {
+			return
+		}
+		assert.Eventually(t, func() bool {
+			_, err := os.Stat(filepath.Join(dir, standInExited))
+			return err == nil
+		}, 10*time.Second, 10*time.Millisecond, "the stand-in's child still runs after its release")
+	})
+	return dir
+}
 
 // ///////////////////////////////////////////////
 // Info
@@ -167,6 +283,10 @@ func TestFromGit_InRepo(t *testing.T) {
 	git("tag", "v1.2.3")
 
 	t.Chdir(dir)
+	// The assertion is about the parse, so a deadline no machine stall
+	// reaches keeps a stalled runner from failing it.
+	// TestRunGit_ExpiredDeadlineStopsGit holds the deadline itself.
+	setGitTimeout(t, time.Minute)
 	assert.Equal(t, "1.2.3", FromGit(), "FromGit() in seeded repo")
 }
 
@@ -292,9 +412,46 @@ func TestRunGit_Version(t *testing.T) {
 		t.Skipf("git is not on PATH: %v", err)
 	}
 	gittest.Isolate(t)
+	setGitTimeout(t, time.Minute)
 	out, err := runGit("--version")
 	require.NoError(t, err, "runGit(--version)")
 	assert.NotEmpty(t, out, "runGit(--version) returned empty output")
+}
+
+// TestRunGit_ExpiredDeadlineStopsGit covers the bound on the git call. With
+// the deadline already past, git never starts, so even --version fails with
+// the deadline's error.
+func TestRunGit_ExpiredDeadlineStopsGit(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skipf("git is not on PATH: %v", err)
+	}
+	gittest.Isolate(t)
+	setGitTimeout(t, 0)
+
+	out, err := runGit("--version")
+
+	require.ErrorIs(t, err, context.DeadlineExceeded, "runGit(--version) past an expired deadline")
+	assert.Empty(t, out, "runGit(--version) answered past an expired deadline")
+}
+
+// TestRunGit_WaitDelayEndsHeldOutput covers gitWaitDelay. Git for Windows'
+// launcher can exit while the git.exe it started still holds the output. Such
+// a git holds runGit for the wait delay and no longer.
+func TestRunGit_WaitDelayEndsHeldOutput(t *testing.T) {
+	gittest.Isolate(t)
+	dir := standInGitDir(t)
+	t.Setenv("PATH", dir)
+	// A deadline no machine stall reaches gives the stand-in time to start its
+	// child. It also leaves the wait delay as the one thing that ends the wait.
+	setGitTimeout(t, time.Minute)
+
+	began := time.Now()
+	_, err := runGit("describe")
+	waited := time.Since(began)
+
+	require.FileExists(t, filepath.Join(dir, standInStarted), "the stand-in never started the child that holds its output")
+	assert.Less(t, waited, standInHold/2, "runGit waited for the child holding git's output")
+	assert.ErrorIs(t, err, exec.ErrWaitDelay, "runGit(describe) with its output held")
 }
 
 // ///////////////////////////////////////////////
