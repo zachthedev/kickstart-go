@@ -366,10 +366,10 @@ token, and that job is the one CI job that holds it, so CI's gate job runs zizmo
 online when `gh auth token` answers, and its summary says which mode ran.
 
 The shared `commits` and `workflows` jobs refuse, before a merge, the files that run code in Bun, bun install or
-commitlint, or that waive a check. Both run their refusals on every pull request, on every push to `main` and daily
-from `audit.yml`, and the `commits` job runs its commitlint steps on a pull request alone. The gate keeps no copy of
-these refusals. A refusal of its own that overlaps one, as the root `.config` does, stays because a program the gate
-starts reads that path. A pull request cannot change what either job runs at its pinned commit. It can change
+commitlint, or that waive a check. Both jobs run their refusals on every pull request, on every push to `main` and
+daily from `audit.yml`. The `commits` job runs its commitlint steps on a pull request alone. The gate keeps no copy
+of these refusals. A refusal of its own that overlaps one, as the root `.config` does, stays because a program the
+gate starts reads that path. A pull request cannot change what either job runs at its pinned commit. It can change
 `ci.yml`'s call, and that change waits on the code owner's review like the gate's code. The shared jobs refuse:
 
 - A tracked `node_modules` or a path under one, and every tracked symbolic link.
@@ -387,9 +387,11 @@ starts reads that path. A pull request cannot change what either job runs at its
 - An inline `zizmor: ignore[...]` comment under `.github`. A waiver lives in the rules of `.github/zizmor.yml`.
 - A key repeated in one mapping of `.github/zizmor.yml`, an anchor, or a second document. zizmor keeps the last copy
   of a repeated audit, so a later copy can turn off an audit the first configures.
-- A tracked composite action outside `.github/actions/`, or one under it named in another case than `action.yml` or
-  `action.yaml`. zizmor reads `.github` alone, and a case-insensitive runner opens an `ACTION.YML` zizmor never
-  reads, while a workflow's `uses: ./<path>` runs an action from anywhere in the checkout.
+- A tracked composite action, an `action.yml` or `action.yaml` in any case, outside `.github/actions/` in that exact
+  spelling, or under it named in another case, such as `ACTION.YML`. zizmor reads `.github` alone, in the gate's
+  zizmor row and in the `workflows` job. `uses: ./<path>` runs an action from anywhere in the checkout, so one at
+  `tools/x` or under a `.GitHub` would run with no audit. A case-insensitive runner opens `ACTION.YML` for `uses:`,
+  and zizmor never reads it.
 - A `secrets: inherit` call into anything but `zachthedev/.github`'s reusable workflows, and a `secrets-inherit`
   waiver that names no such call or names a position.
 
