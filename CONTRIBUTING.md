@@ -387,6 +387,9 @@ starts reads that path. A pull request cannot change what either job runs at its
 - An inline `zizmor: ignore[...]` comment under `.github`. A waiver lives in the rules of `.github/zizmor.yml`.
 - A key repeated in one mapping of `.github/zizmor.yml`, an anchor, or a second document. zizmor keeps the last copy
   of a repeated audit, so a later copy can turn off an audit the first configures.
+- A tracked composite action outside `.github/actions/`, or one under it named in another case than `action.yml` or
+  `action.yaml`. zizmor reads `.github` alone, and a case-insensitive runner opens an `ACTION.YML` zizmor never
+  reads, while a workflow's `uses: ./<path>` runs an action from anywhere in the checkout.
 - A `secrets: inherit` call into anything but `zachthedev/.github`'s reusable workflows, and a `secrets-inherit`
   waiver that names no such call or names a position.
 
@@ -405,11 +408,6 @@ refuses:
 - Anything under `vendor/`, which go builds from in place of the module cache when no `-mod` flag is set.
 - A workflow whose extension is anything but `.yml`, the one spelling actionlint's list and zizmor's collection
   both match.
-- A composite action, an `action.yml` or `action.yaml` in any case, anywhere but under `.github/actions/` in that
-  spelling. A workflow's `uses: ./<path>` runs an action from any path, and zizmor reads `.github` alone, so an
-  action elsewhere, `.GitHub` or an 8.3 short name such as `GITHUB~1` included, runs with no audit. Under
-  `.github/actions/`, the name passes in exact spelling alone. zizmor collects `action.yml` and `action.yaml`, and a
-  case-insensitive runner opens an `ACTION.YML` that zizmor never reads.
 - A `replace`, `godebug` or `ignore` line in `go.mod`. An `ignore` line takes its directories out of every `./...`
   row.
 
