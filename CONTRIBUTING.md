@@ -247,6 +247,9 @@ does not import), or when the thing is a feature flag that ships to users (a run
   exports its own repository through `GIT_DIR` and `GIT_INDEX_FILE`. Without the isolation, a test run from that
   hook would commit, tag and add remotes there. `Isolate` drops every inherited `GIT_` variable and masks the
   user's git configuration.
+- A test that needs a git which exits while a child it started still holds its output calls
+  `internal/gittest.NewStandIn` and sets `PATH` to the stand-in's directory alone. Its package calls
+  `gittest.StandInMain` first in `TestMain`, before `m.Run`.
 - A helper calls `t.Helper()` first and sits above the test functions.
 - Coverage thresholds live in `.testcoverage.yml`. A block that cannot be exercised carries a
   `// coverage-ignore: reason` comment, and `force-annotation-comment` fails one with no reason after the marker.
@@ -259,8 +262,7 @@ Tests that need a real thing:
   needs `go` and `git` on `PATH` and a git checkout. A build-time helper has no other caller.
 - `internal/remote`'s and `internal/version`'s tests run `git` against a repository they create under
   `t.TempDir()`, so they need `git` on `PATH` and nothing else. What they test is the git call. Their wait-delay
-  tests set `PATH` to a directory holding a copy of the test binary named `git`, which plays Git for Windows'
-  launcher.
+  tests run `gittest.NewStandIn`'s copy of the test binary as `git`, which plays Git for Windows' launcher.
 - `internal/generate`'s printed-check test runs the absorbed command `MARKERS.md` prints through `sh` in a
   repository it creates the same way, so it needs `sh` and `git` on `PATH`, and it skips without either. The
   command's exit status is what it tests.
