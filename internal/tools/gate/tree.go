@@ -89,8 +89,7 @@ var rootRefused = []struct {
 // directory (startupFindings), a config the gate names no program to read,
 // tracked or on disk (searchFindings), a go.mod directive that reaches the
 // gate's own build or narrows ./... (goModFindings), and a workflow the
-// workflows rows would skip or a composite action outside .github/actions
-// (walkedFindings).
+// workflows rows would skip (walkedFindings).
 func treeFindings(dir string, tracked trackedLister) ([]string, error) {
 	found, err := configFindings(dir)
 	if err != nil {

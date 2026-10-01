@@ -57,9 +57,6 @@ const (
 	verbosePrefix = "verbose: "
 	// workflowsDir is where GitHub reads workflows, one level deep.
 	workflowsDir = ".github/workflows"
-	// actionsDir is where every composite action lives, the one directory
-	// under .github that zizmor audits actions in.
-	actionsDir = ".github/actions"
 	// installedBin is where bun install puts each package's command, the one
 	// `bun x` runs.
 	installedBin = "node_modules/.bin"
@@ -79,9 +76,6 @@ var (
 	// other shell the set runs, so any other value, a command line such as
 	// /bin/bash -e {0} included, runs a script no ShellCheck reads.
 	allowedShells = []string{"bash", "sh", "pwsh"}
-	// actionFiles are the names GitHub reads a composite action's metadata
-	// from, in the one spelling zizmor collects.
-	actionFiles = []string{"action.yml", "action.yaml"}
 )
 
 // ///////////////////////////////////////////////
@@ -90,7 +84,7 @@ var (
 
 // walkedFindings refuses a tracked workflow whose extension is not a
 // lowercase .yml, which actionlint's file list and zizmor's collection would
-// each skip, and a tracked composite action actionFindings refuses.
+// each skip.
 func walkedFindings(tracked []string) []string {
 	var found []string
 	for _, name := range tracked {
@@ -99,32 +93,8 @@ func walkedFindings(tracked []string) []string {
 			found = append(found, fmt.Sprintf("%q is a workflow named %s, and every workflow here ends in .yml, the one spelling actionlint's own list and zizmor's collection both match. Rename it",
 				name, ext))
 		}
-		found = append(found, actionFindings(name)...)
 	}
 	return found
-}
-
-// actionFindings refuses a tracked name that folds to one of actionFiles
-// unless it sits under .github/actions/ and is spelled exactly as actionFiles
-// has it. A workflow's `uses: ./<path>` runs an action from any path in the
-// checkout, while zizmor reads .github alone, so an action elsewhere, .GitHub
-// or an 8.3 short name included, runs with no audit. Under .github/actions/,
-// zizmor collects the exact spellings alone, while a runner on a
-// case-insensitive file system opens ACTION.YML for uses: too.
-func actionFindings(name string) []string {
-	base := path.Base(name)
-	index := slices.IndexFunc(actionFiles, func(file string) bool { return fold(base) == fold(file) })
-	switch {
-	case index < 0:
-		return nil
-	case !strings.HasPrefix(name, actionsDir+"/"):
-		return []string{fmt.Sprintf("%q is a composite action outside %s/, and zizmor, which reads .github alone, never audits it while a workflow's uses: ./ runs it. Move it under %s/<name>/",
-			name, actionsDir, actionsDir)}
-	case base != actionFiles[index]:
-		return []string{fmt.Sprintf("%q names a composite action in another case than %s, and zizmor, which collects that spelling alone, never audits it while a case-insensitive runner opens it for uses: ./. Rename it %s",
-			name, actionFiles[index], actionFiles[index])}
-	}
-	return nil
 }
 
 // ///////////////////////////////////////////////
