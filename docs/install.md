@@ -50,10 +50,11 @@ gh attestation verify example-linux-amd64 --repo zachthedev/kickstart-go --signe
 the shared release workflow and not this repository's `cd.yml`. Without it `gh attestation verify` refuses a
 genuine file. Those two prove the source repository and the signer, not which release a file belongs to.
 
-To bind a file to its release tag, resolve the commit the tag names and hold the attestation to it:
+To bind a file to its release tag, resolve the commit the tag names and hold the attestation to it. The `tags/`
+form means a branch of the same name cannot answer:
 
 ```sh
-sha=$(gh api repos/zachthedev/kickstart-go/commits/vX.Y.Z --jq .sha)
+sha=$(gh api repos/zachthedev/kickstart-go/commits/tags/vX.Y.Z --jq .sha)
 [ -n "$sha" ] || { echo "vX.Y.Z resolved to no commit" >&2; false; } &&
   gh attestation verify example-linux-amd64 --repo zachthedev/kickstart-go \
     --signer-workflow zachthedev/.github/.github/workflows/publish.yml --source-digest "$sha"

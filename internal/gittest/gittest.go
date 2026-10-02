@@ -6,6 +6,11 @@
 // A test that runs git, or runs code that runs git, under such a hook acts on
 // the repository the hook runs for: it commits onto its branch, tags it, or
 // adds a remote. [Isolate] takes that state away first.
+//
+// [NewStandIn] puts a stand-in for git on a test's PATH: a git that exits
+// while a child it started still holds its output, as Git for Windows'
+// launcher leaves the git.exe it started. A package whose tests use it calls
+// [StandInMain] first in TestMain.
 package gittest
 
 import (

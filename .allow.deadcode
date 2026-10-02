@@ -12,3 +12,12 @@
 
 # [test-only]
 internal/gittest/gittest.go Isolate
+internal/gittest/standin.go NewStandIn
+internal/gittest/standin.go StandIn.Started
+internal/gittest/standin.go StandIn.release
+internal/gittest/standin.go StandInMain
+internal/gittest/standin.go checkStandIn
+internal/gittest/standin.go isStandIn
+internal/gittest/standin.go runStandIn
+internal/gittest/standin.go standInGit
+internal/gittest/standin.go standInName

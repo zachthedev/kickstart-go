@@ -2,15 +2,23 @@ package remote
 
 import (
 	"net/url"
+	"os"
 	"os/exec"
 	"sync"
 	"testing"
+	"time"
 
 	"zach.tools/go/kickstart/internal/gittest"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// TestMain lets the test binary run as gittest's stand-in git.
+func TestMain(m *testing.M) {
+	gittest.StandInMain()
+	os.Exit(m.Run())
+}
 
 // ///////////////////////////////////////////////
 // Test Helpers
@@ -52,6 +60,32 @@ func resetInit(t *testing.T) {
 		ldOwner = ""
 		ldRepo = ""
 	})
+}
+
+// setLookupTimeout sets remoteLookupTimeout for the rest of the test.
+func setLookupTimeout(t *testing.T, d time.Duration) {
+	t.Helper()
+	orig := remoteLookupTimeout
+	remoteLookupTimeout = d
+	t.Cleanup(func() { remoteLookupTimeout = orig })
+}
+
+// githubRemoteRepo creates a repository whose origin is a GitHub URL and
+// returns its directory. The caller isolates git first.
+func githubRemoteRepo(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	for _, args := range [][]string{
+		{"init"},
+		{"remote", "add", "origin", "https://github.com/testowner/testrepo.git"},
+	} {
+		// Args are test-constant string literals; flagging as tainted is a
+		// false positive here.
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...) // #nosec G204 -- the test runs git in its own temporary repository
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, "git %v: %s", args, out)
+	}
+	return dir
 }
 
 // ///////////////////////////////////////////////
@@ -196,25 +230,57 @@ func TestEnsureInit_ParsesGithubRemote(t *testing.T) {
 	// No inherited git state reaches the setup below or ensureInit's own git
 	// call, so neither can add a remote to the repository a hook runs for.
 	gittest.Isolate(t)
-	dir := t.TempDir()
-	run := func(args ...string) {
-		t.Helper()
-		// Args are test-constant string literals; flagging as tainted is a
-		// false positive here.
-		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...) // #nosec G204 -- the test runs git in its own temporary repository
-		out, err := cmd.CombinedOutput()
-		require.NoError(t, err, "git %v: %s", args, out)
-	}
-	run("init")
-	run("remote", "add", "origin", "https://github.com/testowner/testrepo.git")
-
-	t.Chdir(dir)
+	t.Chdir(githubRemoteRepo(t))
 	resetInit(t)
+	// The assertions are about the parse, so a deadline no machine stall
+	// reaches keeps a stalled runner from failing them.
+	// TestEnsureInit_ExpiredDeadlineStopsGit holds the deadline itself.
+	setLookupTimeout(t, time.Minute)
 
 	ensureInit()
 
 	assert.Equal(t, "testowner", owner, "owner")
 	assert.Equal(t, "testrepo", repo, "repo")
+}
+
+// TestEnsureInit_ExpiredDeadlineStopsGit covers the bound on the git call.
+// With the deadline already past, git never starts, so a repository whose
+// remote would parse leaves owner and repo empty.
+func TestEnsureInit_ExpiredDeadlineStopsGit(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skipf("git is not on PATH: %v", err)
+	}
+	gittest.Isolate(t)
+	t.Chdir(githubRemoteRepo(t))
+	resetInit(t)
+	setLookupTimeout(t, 0)
+
+	ensureInit()
+
+	assert.Empty(t, owner, "owner resolved past an expired deadline")
+	assert.Empty(t, repo, "repo resolved past an expired deadline")
+}
+
+// TestEnsureInit_WaitDelayEndsHeldOutput covers lookupWaitDelay. Git for
+// Windows' launcher can exit while the git.exe it started still holds the
+// output. Such a git holds ensureInit for the wait delay and no longer.
+func TestEnsureInit_WaitDelayEndsHeldOutput(t *testing.T) {
+	gittest.Isolate(t)
+	standIn := gittest.NewStandIn(t)
+	t.Setenv("PATH", standIn.Dir)
+	resetInit(t)
+	// A deadline no machine stall reaches gives the stand-in time to start its
+	// child. It also leaves the wait delay as the one thing that ends the wait.
+	setLookupTimeout(t, time.Minute)
+
+	began := time.Now()
+	ensureInit()
+	waited := time.Since(began)
+
+	require.True(t, standIn.Started(), "the stand-in never started the child that holds its output")
+	assert.Less(t, waited, gittest.StandInHold/2, "ensureInit waited for the child holding git's output")
+	assert.Empty(t, owner, "owner")
+	assert.Empty(t, repo, "repo")
 }
 
 // TestEnsureInit_GitFails covers the error branch where no ldflags are set

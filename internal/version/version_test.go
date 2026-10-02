@@ -1,9 +1,12 @@
 package version
 
 import (
+	"context"
+	"os"
 	"os/exec"
 	"runtime/debug"
 	"testing"
+	"time"
 
 	modsemver "golang.org/x/mod/semver"
 
@@ -12,6 +15,24 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// TestMain lets the test binary run as gittest's stand-in git.
+func TestMain(m *testing.M) {
+	gittest.StandInMain()
+	os.Exit(m.Run())
+}
+
+// ///////////////////////////////////////////////
+// Test Helpers
+// ///////////////////////////////////////////////
+
+// setGitTimeout sets gitTimeout for the rest of the test.
+func setGitTimeout(t *testing.T, d time.Duration) {
+	t.Helper()
+	orig := gitTimeout
+	gitTimeout = d
+	t.Cleanup(func() { gitTimeout = orig })
+}
 
 // ///////////////////////////////////////////////
 // Info
@@ -167,6 +188,10 @@ func TestFromGit_InRepo(t *testing.T) {
 	git("tag", "v1.2.3")
 
 	t.Chdir(dir)
+	// The assertion is about the parse, so a deadline no machine stall
+	// reaches keeps a stalled runner from failing it.
+	// TestRunGit_ExpiredDeadlineStopsGit holds the deadline itself.
+	setGitTimeout(t, time.Minute)
 	assert.Equal(t, "1.2.3", FromGit(), "FromGit() in seeded repo")
 }
 
@@ -292,9 +317,46 @@ func TestRunGit_Version(t *testing.T) {
 		t.Skipf("git is not on PATH: %v", err)
 	}
 	gittest.Isolate(t)
+	setGitTimeout(t, time.Minute)
 	out, err := runGit("--version")
 	require.NoError(t, err, "runGit(--version)")
 	assert.NotEmpty(t, out, "runGit(--version) returned empty output")
+}
+
+// TestRunGit_ExpiredDeadlineStopsGit covers the bound on the git call. With
+// the deadline already past, git never starts, so even --version fails with
+// the deadline's error.
+func TestRunGit_ExpiredDeadlineStopsGit(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skipf("git is not on PATH: %v", err)
+	}
+	gittest.Isolate(t)
+	setGitTimeout(t, 0)
+
+	out, err := runGit("--version")
+
+	require.ErrorIs(t, err, context.DeadlineExceeded, "runGit(--version) past an expired deadline")
+	assert.Empty(t, out, "runGit(--version) answered past an expired deadline")
+}
+
+// TestRunGit_WaitDelayEndsHeldOutput covers gitWaitDelay. Git for Windows'
+// launcher can exit while the git.exe it started still holds the output. Such
+// a git holds runGit for the wait delay and no longer.
+func TestRunGit_WaitDelayEndsHeldOutput(t *testing.T) {
+	gittest.Isolate(t)
+	standIn := gittest.NewStandIn(t)
+	t.Setenv("PATH", standIn.Dir)
+	// A deadline no machine stall reaches gives the stand-in time to start its
+	// child. It also leaves the wait delay as the one thing that ends the wait.
+	setGitTimeout(t, time.Minute)
+
+	began := time.Now()
+	_, err := runGit("describe")
+	waited := time.Since(began)
+
+	require.True(t, standIn.Started(), "the stand-in never started the child that holds its output")
+	assert.Less(t, waited, gittest.StandInHold/2, "runGit waited for the child holding git's output")
+	assert.ErrorIs(t, err, exec.ErrWaitDelay, "runGit(describe) with its output held")
 }
 
 // ///////////////////////////////////////////////

@@ -16,8 +16,8 @@ name: audit
 # a ref that moves is reported with no pull request open.
 #
 # The commits job runs its tree refusals over the default branch, so a push that started no ci
-# run, one whose message holds [skip ci] or one made with the workflow token, meets them within a
-# day.
+# run, one whose message holds [skip ci] or one made with the workflow token, meets them at the
+# next daily audit run.
 on:
   schedule:
     # At least once a day. The hour is clear of deps.yml's cron.
