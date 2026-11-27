@@ -60,7 +60,7 @@ jobs:
       # build cache, and any job that runs on main can save one this build would restore. A
       # release build restores no package cache, so go downloads each module and checks it
       # against go.sum.
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
           cache: false
@@ -77,7 +77,7 @@ jobs:
             exit 1
           fi
           go tool task release VERSION="${TAG#v}"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release
           path: dist/release/
